@@ -61,6 +61,13 @@ export function useKeys() {
         return
       }
 
+      // ctrl+g: toggle namespace grouping (flat list ⇄ grouped headers)
+      if (e.ctrlKey && e.key === 'g') {
+        e.preventDefault()
+        s.toggleGroupByNamespace()
+        return
+      }
+
       // ctrl+k: instant kill, no confirmation (multi-select aware)
       if (e.ctrlKey && e.key === 'k') {
         e.preventDefault()

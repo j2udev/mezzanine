@@ -3,9 +3,10 @@ import { statusColor } from '../constants'
 
 function rowFields(item, resource) {
   if (resource.startsWith('cr:')) {
-    return item.status ? [
-      { value: item.status, color: statusColor(item.status), w: 88 },
-    ] : []
+    return [
+      { value: item.status || '', color: statusColor(item.status), w: 88 },
+      { value: item.age || '',    color: '#3a6070', w: 55, right: true },
+    ]
   }
   switch (resource) {
     case 'pods':
@@ -30,37 +31,43 @@ function rowFields(item, resource) {
         { value: item.type,              color: '#aa55ff', w: 88 },
         { value: item.clusterIP,         color: '#3a7090', w: 100, mono: true },
         { value: item.externalIP || '',  color: item.externalIP ? '#00d4ff' : '#253a55', w: 130, mono: true },
-        { value: item.ports,             color: '#3a6070', w: 130, mono: true, right: true },
+        { value: item.ports,             color: '#3a6070', w: 130, mono: true },
+        { value: item.age || '',         color: '#3a6070', w: 55, right: true },
       ]
     case 'statefulsets':
       return [
-        { value: item.status, color: statusColor(item.status), w: 88 },
-        { value: item.ready,  color: '#4a8aaa', w: 60 },
+        { value: item.status,    color: statusColor(item.status), w: 88 },
+        { value: item.ready,     color: '#4a8aaa', w: 60 },
+        { value: item.age || '', color: '#3a6070', w: 55, right: true },
       ]
     case 'daemonsets':
       return [
         { value: item.status,         color: statusColor(item.status), w: 88 },
         { value: `${item.desired}`,   color: '#3a7090', w: 72 },
         { value: `${item.ready}`,     color: item.ready < item.desired ? '#ffcc00' : '#4a8aaa', w: 60 },
+        { value: item.age || '',      color: '#3a6070', w: 55, right: true },
       ]
     case 'jobs':
       return [
         { value: item.status,      color: statusColor(item.status), w: 88 },
         { value: item.completions, color: '#4a8aaa', w: 100 },
-        { value: item.duration,    color: '#3a6070', w: 72, right: true },
+        { value: item.duration,    color: '#3a6070', w: 72 },
+        { value: item.age || '',   color: '#3a6070', w: 55, right: true },
       ]
     case 'cronjobs':
       return [
         { value: item.status,       color: statusColor(item.status), w: 88 },
         { value: item.schedule,     color: '#aa55ff', w: 140, mono: true },
         { value: `${item.active}`,  color: item.active > 0 ? '#ffcc00' : '#2a4a6a', w: 60 },
-        { value: item.lastSchedule, color: '#3a6070', w: 72, right: true },
+        { value: item.lastSchedule, color: '#3a6070', w: 72 },
+        { value: item.age || '',    color: '#3a6070', w: 55, right: true },
       ]
     case 'ingresses':
       return [
-        { value: item.hosts,   color: '#00d4ff', w: 180 },
-        { value: item.address, color: '#3a7090', w: 120, mono: true },
-        { value: item.ports,   color: '#3a6070', w: 60, right: true },
+        { value: item.hosts,     color: '#00d4ff', w: 180 },
+        { value: item.address,   color: '#3a7090', w: 120, mono: true },
+        { value: item.ports,     color: '#3a6070', w: 60 },
+        { value: item.age || '', color: '#3a6070', w: 55, right: true },
       ]
     case 'configmaps':
       return [
@@ -70,42 +77,49 @@ function rowFields(item, resource) {
     case 'secrets':
       return [
         { value: item.type,           color: '#ff4488', w: 180 },
-        { value: `${item.keys} keys`, color: '#3a7090', w: 60, right: true },
+        { value: `${item.keys} keys`, color: '#3a7090', w: 60 },
+        { value: item.age || '',      color: '#3a6070', w: 55, right: true },
       ]
     case 'pvcs':
       return [
-        { value: item.status,   color: statusColor(item.status), w: 88 },
-        { value: item.volume,   color: '#3a7090', w: 150, mono: true },
-        { value: item.capacity, color: '#3a6070', w: 90, right: true },
+        { value: item.status,    color: statusColor(item.status), w: 88 },
+        { value: item.volume,    color: '#3a7090', w: 150, mono: true },
+        { value: item.capacity,  color: '#3a6070', w: 90 },
+        { value: item.age || '', color: '#3a6070', w: 55, right: true },
       ]
     case 'pvs':
       return [
         { value: item.status,       color: statusColor(item.status), w: 88 },
         { value: item.claim,        color: '#3a7090', w: 200, mono: true },
         { value: item.storageClass, color: '#aa55ff', w: 110 },
-        { value: item.capacity,     color: '#3a6070', w: 90, right: true },
+        { value: item.capacity,     color: '#3a6070', w: 90 },
+        { value: item.age || '',    color: '#3a6070', w: 55, right: true },
       ]
     case 'nodes':
       return [
-        { value: item.status,  color: statusColor(item.status), w: 88 },
-        { value: item.roles,   color: '#aa55ff', w: 120 },
-        { value: item.version, color: '#3a6070', w: 100, mono: true, right: true },
+        { value: item.status,    color: statusColor(item.status), w: 88 },
+        { value: item.roles,     color: '#aa55ff', w: 120 },
+        { value: item.version,   color: '#3a6070', w: 100, mono: true },
+        { value: item.age || '', color: '#3a6070', w: 55, right: true },
       ]
     case 'namespaces':
       return [
-        { value: item.status, color: statusColor(item.status), w: 88 },
+        { value: item.status,    color: statusColor(item.status), w: 88 },
+        { value: item.age || '', color: '#3a6070', w: 55, right: true },
       ]
     case 'crds':
       return [
         { value: item.group,                                 color: '#aa55ff', w: 180, mono: true },
         { value: item.version,                               color: '#4a8aaa', w: 80 },
-        { value: item.namespaced ? 'Namespaced' : 'Cluster', color: '#3a6070', w: 80, right: true },
+        { value: item.namespaced ? 'Namespaced' : 'Cluster', color: '#3a6070', w: 80 },
+        { value: item.age || '',                             color: '#3a6070', w: 55, right: true },
       ]
     case 'helmreleases':
       return [
         { value: item.chart,         color: '#00d4ff', w: 200 },
         { value: `v${item.version}`, color: '#3a7090', w: 80, mono: true },
-        { value: item.status,        color: statusColor(item.status), w: 88, right: true },
+        { value: item.status,        color: statusColor(item.status), w: 88 },
+        { value: item.age || '',     color: '#3a6070', w: 55, right: true },
       ]
     case 'replicasets':
       return [
@@ -117,13 +131,15 @@ function rowFields(item, resource) {
       return [
         { value: item.targetRef,                         color: '#aa55ff', w: 200 },
         { value: `${item.minReplicas}–${item.maxReplicas}`, color: '#3a7090', w: 80 },
-        { value: `${item.currentReplicas}`,              color: '#4a8aaa', w: 60, right: true },
+        { value: `${item.currentReplicas}`,              color: '#4a8aaa', w: 60 },
+        { value: item.age || '',                         color: '#3a6070', w: 55, right: true },
       ]
     case 'pdb':
       return [
         { value: item.status,                                    color: statusColor(item.status), w: 88 },
         { value: item.minAvailable ? `min:${item.minAvailable}` : `maxUnavail:${item.maxUnavailable}`, color: '#aa55ff', w: 140 },
-        { value: `${item.allowed} allowed`,                     color: '#3a6070', w: 90, right: true },
+        { value: `${item.allowed} allowed`,                     color: '#3a6070', w: 90 },
+        { value: item.age || '',                                color: '#3a6070', w: 55, right: true },
       ]
     case 'networkpolicies':
       return [
@@ -140,13 +156,15 @@ function rowFields(item, resource) {
       return [
         { value: `cpu: ${item.cpu}`,    color: '#44aaff', w: 150, mono: true },
         { value: `mem: ${item.memory}`, color: '#aa55ff', w: 160, mono: true },
-        { value: `pods: ${item.pods}`,  color: '#3a6070', w: 90, mono: true, right: true },
+        { value: `pods: ${item.pods}`,  color: '#3a6070', w: 90, mono: true },
+        { value: item.age || '',        color: '#3a6070', w: 55, right: true },
       ]
     case 'storageclasses':
       return [
         { value: item.provisioner,  color: '#44aaff', w: 220, mono: true },
         { value: item.reclaim,      color: '#aa55ff', w: 80 },
-        { value: item.bindingMode,  color: '#3a6070', w: 180, right: true },
+        { value: item.bindingMode,  color: '#3a6070', w: 180 },
+        { value: item.age || '',    color: '#3a6070', w: 55, right: true },
       ]
     case 'roles':
     case 'clusterroles':
@@ -166,7 +184,8 @@ function rowFields(item, resource) {
         { value: item.type,   color: statusColor(item.type), w: 72 },
         { value: item.reason, color: '#aa55ff', w: 140 },
         { value: item.object, color: '#3a7090', w: 200, mono: true },
-        { value: `×${item.count}`, color: item.count > 1 ? '#ffcc44' : '#3a6070', w: 50, right: true },
+        { value: `×${item.count}`, color: item.count > 1 ? '#ffcc44' : '#3a6070', w: 50 },
+        { value: item.age || '',   color: '#3a6070', w: 55, right: true },
       ]
     case 'containers':
       return [
@@ -180,7 +199,7 @@ function rowFields(item, resource) {
   }
 }
 
-export function ResourceRow({ item, resource, selected, multiSelected, scrollIntoView, onSelect, onToggleMulti, animDelay, firstInGroup }) {
+export function ResourceRow({ item, resource, selected, multiSelected, scrollIntoView, onSelect, onToggleMulti, animDelay, firstInGroup, nsColumnWidth = 0, nsColor }) {
   const ref = useRef()
   const rowColor = statusColor(item.status)
   const fields = rowFields(item, resource)
@@ -220,6 +239,17 @@ export function ResourceRow({ item, resource, selected, multiSelected, scrollInt
 
       {/* Status dot */}
       <span style={{ width: 8, height: 8, borderRadius: '50%', background: rowColor, boxShadow: `0 0 6px ${rowColor}`, flexShrink: 0, marginRight: 10 }} />
+
+      {/* Namespace (flat list mode) */}
+      {nsColumnWidth > 0 && (
+        <span style={{
+          width: nsColumnWidth, flexShrink: 0, fontSize: 11, paddingRight: 8,
+          color: nsColor || '#3a6070', fontFamily: 'inherit',
+          overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+        }}>
+          {item.namespace || ''}
+        </span>
+      )}
 
       {/* Name */}
       <span style={{ flex: 1, fontSize: 12, color: selected ? '#e8f4ff' : '#9ab8d0', fontFamily: 'inherit', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', letterSpacing: '0.01em', minWidth: 80 }}>

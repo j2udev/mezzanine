@@ -215,10 +215,30 @@ export function getMockResources() {
     s.containerPorts = data.pods.find(p => p.namespace === s.namespace && p.name.startsWith(s.name + '-'))?.containerPorts || []
   }
 
+  // Every resource type carries an AGE column; fill any demo rows that don't
+  // already specify one with a plausible, deterministic value (stable per id).
+  for (const list of Object.values(data)) {
+    if (Array.isArray(list)) list.forEach(fillAge)
+  }
+
   return data
 }
 
+const AGE_POOL = ['5m', '12m', '1h', '4h', '8h', '1d', '3d', '5d', '7d', '14d', '30d', '45d']
+function fillAge(item) {
+  if (item && item.age == null) {
+    const h = [...(item.id || item.name || '')].reduce((a, c) => a + c.charCodeAt(0), 0)
+    item.age = AGE_POOL[h % AGE_POOL.length]
+  }
+}
+
 export function getMockCrdResources(group, version, plural) {
+  const list = mockCrdResources(group, plural)
+  list.forEach(fillAge)
+  return list
+}
+
+function mockCrdResources(group, plural) {
   if (group === 'cert-manager.io' && plural === 'certificates') {
     return [
       { id: 'cr1', name: 'frontend-tls',    namespace: 'default',    status: 'Ready'   },

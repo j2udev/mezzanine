@@ -16,9 +16,11 @@ export function ActionMenu() {
       || (s.activeResource.startsWith('cr:') ? (s.crdResources[s.activeResource.slice(3)] || []) : (s[s.activeResource] || []))
   )
 
-  const [filter, setFilter] = useState('')
-  const [idx, setIdx]       = useState(0)
-  const inputRef = useRef()
+  const [filter, setFilter]             = useState('')
+  const [idx, setIdx]                   = useState(0)
+  const [searchFocused, setSearchFocused] = useState(false)
+  const inputRef    = useRef()
+  const selectedRef = useRef()
 
   const item = items.find(i => i.id === selectedId)
 
@@ -29,22 +31,36 @@ export function ActionMenu() {
     return all.filter(a => a.label.toLowerCase().includes(q) || a.id.includes(q))
   }, [activeResource, filter])
 
-  useEffect(() => { if (open) { setFilter(''); setIdx(0); setTimeout(() => inputRef.current?.focus(), 30) } }, [open])
+  // Open in keyboard-nav mode: search is NOT focused — j/k scrolls, Enter / direct
+  // shortcuts run, `/` focuses the filter (matches the rest of the app).
+  useEffect(() => { if (open) { setFilter(''); setIdx(0); setSearchFocused(false) } }, [open])
   useEffect(() => { setIdx(0) }, [filter])
+  useEffect(() => { selectedRef.current?.scrollIntoView({ block: 'nearest' }) }, [idx])
 
   const run = (a) => { close(); a.run(useStore.getState()) }
 
   useEffect(() => {
     if (!open) return
     const onKey = e => {
-      if (e.key === 'Escape')    { e.preventDefault(); e.stopPropagation(); close(); return }
-      if (e.key === 'ArrowDown') { e.preventDefault(); e.stopPropagation(); setIdx(i => Math.min(i + 1, actions.length - 1)); return }
-      if (e.key === 'ArrowUp')   { e.preventDefault(); e.stopPropagation(); setIdx(i => Math.max(i - 1, 0)); return }
-      if (e.key === 'Enter')     { e.preventDefault(); e.stopPropagation(); if (actions[idx]) run(actions[idx]); return }
+      // While the filter input is focused, let it own typing; only Esc (back to nav) and
+      // Enter (run the selected action) are intercepted.
+      if (searchFocused) {
+        if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); inputRef.current?.blur(); return }
+        if (e.key === 'Enter')  { e.preventDefault(); e.stopPropagation(); if (actions[idx]) run(actions[idx]); return }
+        return
+      }
+      if (e.key === 'Escape')                       { e.preventDefault(); e.stopPropagation(); close(); return }
+      if (e.key === '/')                            { e.preventDefault(); e.stopPropagation(); inputRef.current?.focus(); return }
+      if (e.key === 'j' || e.key === 'ArrowDown')   { e.preventDefault(); e.stopPropagation(); setIdx(i => Math.min(i + 1, actions.length - 1)); return }
+      if (e.key === 'k' || e.key === 'ArrowUp')     { e.preventDefault(); e.stopPropagation(); setIdx(i => Math.max(i - 1, 0)); return }
+      if (e.key === 'Enter')                        { e.preventDefault(); e.stopPropagation(); if (actions[idx]) run(actions[idx]); return }
+      // Hit an action's own shortcut straight from the menu (l/d/y/e/v/⇧f/…).
+      const direct = applicableActions(activeResource).find(a => a.key && a.key(e))
+      if (direct) { e.preventDefault(); e.stopPropagation(); run(direct); return }
     }
     window.addEventListener('keydown', onKey, true)
     return () => window.removeEventListener('keydown', onKey, true)
-  }, [open, actions, idx, close])
+  }, [open, actions, idx, close, searchFocused, activeResource])
 
   if (!open || !item) return null
   const label = activeResource.startsWith('cr:') ? activeResource.slice(3).split('/').pop() : activeResource
@@ -80,9 +96,13 @@ export function ActionMenu() {
             ref={inputRef}
             value={filter}
             onChange={e => setFilter(e.target.value)}
-            placeholder="filter actions…"
+            onFocus={() => setSearchFocused(true)}
+            onBlur={() => setSearchFocused(false)}
+            placeholder={searchFocused ? 'filter actions…' : 'press / to filter'}
             style={{
-              width: '100%', background: 'rgba(0,212,255,0.06)', border: '1px solid rgba(0,212,255,0.18)',
+              width: '100%',
+              background: searchFocused ? 'rgba(0,212,255,0.1)' : 'rgba(0,212,255,0.04)',
+              border: `1px solid ${searchFocused ? 'rgba(0,212,255,0.4)' : 'rgba(0,212,255,0.12)'}`,
               color: '#c0e8ff', fontSize: 12, padding: '4px 8px', borderRadius: 4,
               fontFamily: 'inherit', outline: 'none',
             }}
@@ -105,6 +125,7 @@ export function ActionMenu() {
                   </div>
                 )}
                 <div
+                  ref={selected ? selectedRef : null}
                   onClick={() => run(a)}
                   onMouseEnter={() => setIdx(i)}
                   style={{
@@ -129,7 +150,7 @@ export function ActionMenu() {
         {/* Footer */}
         <div style={{ padding: '6px 14px', borderTop: '1px solid rgba(0,212,255,0.12)', flexShrink: 0,
           display: 'flex', gap: 12, fontSize: 10, color: '#3a5a7a', background: 'rgba(0,0,0,0.25)' }}>
-          <span>↑↓ move</span><span>↵ run</span><span>esc close</span>
+          <span>j/k move</span><span>↵ run</span><span>shortcut runs</span><span>/ filter</span><span>esc close</span>
         </div>
       </div>
     </div>

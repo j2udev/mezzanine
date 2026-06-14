@@ -29,6 +29,8 @@ neon-cursive font — `.mezz-wordmark` in `client/src/index.css`, served from
 │       │   ├── ResourceRow.jsx         # Per-resource-type row columns
 │       │   ├── DetailPanel.jsx         # Right panel: detail + wrapping action chips (from registry)
 │       │   ├── ActionModal.jsx         # Full-screen modal: logs/describe/yaml/json/edit/helm
+│       │   ├── VimEditor.jsx           # CodeMirror 6 + @replit/codemirror-vim editor (edit mode, #61/#62)
+│       │   ├── VimHelpOverlay.jsx      # ? vim cheatsheet shown over the edit modal (#61)
 │       │   ├── ActionMenu.jsx          # Actions palette (a) — all applicable actions, grouped/filterable
 │       │   ├── PortForwardModal.jsx    # Shift+F port-forward dialog (port suggestions from object)
 │       │   └── HelpModal.jsx           # ? shortcuts overlay
@@ -118,6 +120,7 @@ rm ~/.cache/ms-playwright-mcp/mcp-chrome-for-testing-b2bf846/SingletonCookie
 | `Shift+J` | Jump to owner (pod/replicaset → controller; job → cronjob) |
 | `a` | Actions palette — all actions applicable to the selection |
 | `gg / G` | Go to first / last item in the resource list |
+| `ctrl+g` | Toggle namespace grouping (flat list ⇄ grouped headers; flat is default) |
 | `Space` | Toggle multi-select on current item (no cursor advance) |
 | `ctrl+d` | Delete with confirmation (multi-select aware) |
 | `ctrl+k` | Kill instantly (multi-select aware) |
@@ -141,8 +144,8 @@ rm ~/.cache/ms-playwright-mcp/mcp-chrome-for-testing-b2bf846/SingletonCookie
 | `n / N` | Next / prev match |
 | `c` | Copy (non-edit mode) — copies the on-screen view (describe/yaml/json) |
 | `e` | From a read view: enter edit mode (forces YAML, line numbers on) |
-| `i` | From edit NORMAL: enter INSERT |
-| `Esc` | Step-dismiss: editMode→yaml, blur→clearSearch→close |
+| `?` | In edit mode: open the vim cheatsheet overlay (VimHelpOverlay) |
+| `Esc` | Read view: clearSearch → close. In edit mode CodeMirror owns Esc (insert→normal, etc.) |
 | `#` | Toggle line numbers (all inspect read views + edit) |
 
 ### Unified inspect modal (ActionModal.jsx) — describe/yaml/edit
@@ -157,31 +160,25 @@ rm ~/.cache/ms-playwright-mcp/mcp-chrome-for-testing-b2bf846/SingletonCookie
 - Helm Values modal: single view with USER/ALL footer toggle (re-fetches with `?all=true`)
 - Search highlighting preserves syntax colors — matched substring highlighted within each span
 
-### Edit vim mode (inside editMode) — real block cursor (#40, #55)
-The edit textarea stays **focused** in NORMAL/VISUAL; the cursor is a 1-char selection
-(NORMAL) or anchor→cursor span (VISUAL), rendered via `setSelectionRange` (native caret
-hidden — `caretColor: transparent`). Motions/operators are pure functions in
-`client/src/lib/vim.js`; `ActionModal` owns the React state (`editContent` / `editCursor` /
-`vimRegister` / `vimVisual`) and applies their results. Click in the textarea repositions
-the block cursor (`onMouseUp` → `editCursor`).
+### Edit vim mode — CodeMirror 6 + `@replit/codemirror-vim` (#61, #62)
+Edit mode renders `client/src/components/VimEditor.jsx`, a CodeMirror 6 `EditorView` that
+**owns the buffer and the entire vim engine** (counts, operator+motion, text objects `ciw`/
+`diw`/`ci"`, `f/F/t/T`/`;`/`,`, `u`/`Ctrl-r`, `.` repeat, registers, `q` macros, ex commands).
+It also gives yaml/json **syntax highlighting** (partial #62). `vim.js` was deleted.
 
-| Key | Action |
-|-----|--------|
-| `h j k l` / arrows | Move cursor (NORMAL/VISUAL) |
-| `w / b` | Word forward / back |
-| `0 / ^ / $` | Line start / first-non-blank / line end |
-| `gg / G` | File top / last line |
-| `i / a / I / A` | INSERT at / after cursor / line start / line end |
-| `o / O` | Open line below / above (keeps indent) + INSERT |
-| `v` | Toggle VISUAL mode (extend with motions) |
-| `x` | Delete char (or VISUAL selection). On **secrets**, `x` is decode-toggle instead |
-| `dd / D` | Delete line / to line-end (yanks to register) |
-| `yy` | Yank line; `y` in VISUAL yanks selection |
-| `p / P` | Put register after / before (linewise or charwise) |
-| `:` | Command line — `:w` save · `:wq`/`:x` save+close · `:q`/`:q!` back to read |
-| `Esc` | INSERT→NORMAL (cursor left); VISUAL→NORMAL; NORMAL→read view |
-| `/`, `n / N` | Search — moves the **real cursor** to the match (not just the view) |
-| VIM toggle | Footer button disables vim → plain textarea (native caret/typing) |
+Integration contract (see `ActionModal.jsx`):
+- The modal’s capture-phase key handler **early-returns whenever `editMode` is true** — it
+  yields every key to CodeMirror (motions, `Esc`, `:`, `/`, `?`). Read views / logs are unchanged.
+- Ex commands are registered **once** in VimEditor via `Vim.defineEx`: `:w`→onSave, `:wq`/`:x`
+  →onSaveClose, `:q`/`:q!`→onQuit (back to read). They dispatch through a module-level
+  `handlers` object the live editor keeps pointed at the current ActionModal callbacks.
+- `handleSave` reads the **live doc** (`editViewRef.current.state.doc`), not React state.
+- `?` is mapped (normal+visual) via `Vim.defineAction`+`Vim.mapCommand` to open `VimHelpOverlay`.
+- Vim on/off, line numbers, and language are swapped through CodeMirror `Compartment`s without
+  remounting. VIM toggle off = plain CodeMirror (native caret/typing).
+- `vimMode` state (from the `vim-mode-change` event) drives the footer NORMAL/INSERT/VISUAL chip.
+- Secret decode in edit is the **footer Decode button only** (`x` is now vim delete-char); it
+  transforms the live text and pushes it back through the `value` prop.
 
 ## Object Actions (`client/src/actions.js`) — the scalable pattern
 
@@ -295,9 +292,16 @@ Session 8 added: unified describe/yaml/json inspect modal (#37) + format-aware c
 combined helm Values USER/ALL view with fixed yaml tabbing (#36), port-forward via Shift+F
 (#38), and workload status that reflects unhealthy owned pods (#41).
 
+**Session 10:** #61 — replaced the hand-rolled edit-mode vim with CodeMirror 6 +
+`@replit/codemirror-vim` (full vim: counts, text objects, change ops, f/t, u/Ctrl-r, `.`,
+macros, ex commands). Added VimEditor.jsx + VimHelpOverlay.jsx (`?`), deleted lib/vim.js.
+yaml/json syntax highlighting in the editor lands #62 partially (read views still custom).
+
 **Remaining:**
 - #14 Custom theme / company branding
 - #15 In-cluster deploy
 - #16 Multi-cluster support
 - #17 Single binary packaging
-- #40 Richer vim keybinds in edit mode (visual/yank/delete/:wq; filter cursor placement)
+- #46 Faster auto-refresh · #51 filter indicator · #53 port-forward tracking table
+- #56 helm-history `v` values · #58 actions palette scroll-only · #59 multi-container logs 400
+- #60 filter tab-autocomplete · #62 syntax highlighting in read views (editor done)

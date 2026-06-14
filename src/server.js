@@ -8,6 +8,7 @@ import { existsSync } from 'fs'
 import { exec, spawn } from 'child_process'
 import { promisify } from 'util'
 import cors from 'cors'
+import yaml from 'js-yaml'
 import { fetchResources, fetchCrdInstances } from './k8s.js'
 import { getMockLogs, getMockDescribe, getMockYaml, getMockCrdResources, getMockHelmValues, getMockHelmAllValues, getMockHelmManifest, getMockHelmHistory, getMockHelmNotes } from './mock.js'
 
@@ -95,14 +96,33 @@ app.get('/api/logs/:namespace/:pod', async (req, res) => {
     const kc = new k8s.KubeConfig()
     kc.loadFromDefault()
     const coreApi = kc.makeApiClient(k8s.CoreV1Api)
-    const params = {
+    const baseParams = {
       name: pod, namespace,
       ...(tailLines !== undefined && { tailLines }),
-      ...(container && { container }),
       ...(sinceSeconds && { sinceSeconds: parseInt(sinceSeconds) }),
     }
-    const result = await coreApi.readNamespacedPodLog(params)
-    res.json({ logs: typeof result === 'string' ? result : String(result) })
+    if (container) {
+      const result = await coreApi.readNamespacedPodLog({ ...baseParams, container })
+      return res.json({ logs: typeof result === 'string' ? result : String(result) })
+    }
+    // No container = "all containers". The k8s API rejects a container-less log
+    // request on a multi-container pod (400), so fetch each container and combine.
+    const podInfo = await coreApi.readNamespacedPod({ name: pod, namespace })
+    const containers = (podInfo.spec?.containers || []).map(c => c.name)
+    if (containers.length <= 1) {
+      const result = await coreApi.readNamespacedPodLog(baseParams)
+      return res.json({ logs: typeof result === 'string' ? result : String(result) })
+    }
+    const parts = await Promise.all(containers.map(async c => {
+      try {
+        const r = await coreApi.readNamespacedPodLog({ ...baseParams, container: c })
+        const text = (typeof r === 'string' ? r : String(r)).trim()
+        return text ? text.split('\n').map(l => `[${c}] ${l}`).join('\n') : `[${c}] (no logs)`
+      } catch (e) {
+        return `[${c}] Error: ${e.message}`
+      }
+    }))
+    res.json({ logs: parts.join('\n') })
   } catch (err) {
     res.json({ logs: `Error fetching logs: ${err.message}` })
   }
@@ -209,7 +229,14 @@ app.get('/api/yaml/:resource/:namespace/:name', async (req, res) => {
 app.get('/api/json/:resource/:namespace/:name', async (req, res) => {
   const { resource, namespace, name } = req.params
   if (latest.demoMode) {
-    return res.json({ output: JSON.stringify(JSON.parse('{}'), null, 2) })
+    // Demo mode has no kubectl — derive JSON from the same mock YAML so the JSON
+    // view mirrors the YAML view instead of returning an empty {}.
+    try {
+      const obj = yaml.load(getMockYaml(resource, name, namespace)) || {}
+      return res.json({ output: JSON.stringify(obj, null, 2) })
+    } catch (err) {
+      return res.json({ output: '{}', error: err.message })
+    }
   }
   try {
     const nsFlag = namespace !== '_' ? `-n ${namespace}` : ''

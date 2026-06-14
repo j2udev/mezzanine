@@ -237,6 +237,7 @@ export async function fetchResources() {
       replicas: s.spec.replicas ?? 0,
       readyReplicas: s.status.readyReplicas ?? 0,
       status: (s.status.readyReplicas ?? 0) >= (s.spec.replicas ?? 1) ? 'Available' : 'Degraded',
+      age: age(s.metadata.creationTimestamp),
       containerPorts: templatePorts(s.spec.template?.spec?.containers),
     }))
 
@@ -247,6 +248,7 @@ export async function fetchResources() {
       desired: d.status.desiredNumberScheduled ?? 0,
       ready: d.status.numberReady ?? 0,
       status: (d.status.numberReady ?? 0) >= (d.status.desiredNumberScheduled ?? 1) ? 'Available' : 'Degraded',
+      age: age(d.metadata.creationTimestamp),
     }))
 
     const jobs = jobsRes.items.map(j => {
@@ -271,6 +273,7 @@ export async function fetchResources() {
         status,
         completions: `${succeeded}/${completions}`,
         duration,
+        age: age(j.metadata.creationTimestamp),
         owner: ownerTarget(j.metadata),
       }
     })
@@ -283,6 +286,7 @@ export async function fetchResources() {
       active: c.status.active?.length ?? 0,
       lastSchedule: c.status.lastScheduleTime ? age(c.status.lastScheduleTime) : 'never',
       status: c.spec.suspend ? 'Suspended' : 'Active',
+      age: age(c.metadata.creationTimestamp),
     }))
 
     const ingresses = ingRes.items.map(i => ({
@@ -293,6 +297,7 @@ export async function fetchResources() {
       address: i.status.loadBalancer?.ingress?.[0]?.hostname || i.status.loadBalancer?.ingress?.[0]?.ip || '',
       ports: i.spec.tls?.length ? '80, 443' : '80',
       status: 'Active',
+      age: age(i.metadata.creationTimestamp),
     }))
 
     const configmaps = cmRes.items.map(c => ({
@@ -311,6 +316,7 @@ export async function fetchResources() {
       type: s.type,
       keys: Object.keys(s.data || {}).length,
       status: 'Active',
+      age: age(s.metadata.creationTimestamp),
     }))
 
     const pvcs = pvcRes.items.map(p => ({
@@ -320,6 +326,7 @@ export async function fetchResources() {
       status: p.status.phase || 'Unknown',
       volume: p.spec.volumeName || '',
       capacity: p.status.capacity?.storage || '',
+      age: age(p.metadata.creationTimestamp),
     }))
 
     const pvs = pvRes.items.map(p => ({
@@ -330,6 +337,7 @@ export async function fetchResources() {
       claim: p.spec.claimRef ? `${p.spec.claimRef.namespace}/${p.spec.claimRef.name}` : '',
       storageClass: p.spec.storageClassName || '',
       capacity: p.spec.capacity?.storage || '',
+      age: age(p.metadata.creationTimestamp),
     }))
 
     const replicasets = rsRes.items.map(r => ({
@@ -409,6 +417,7 @@ export async function fetchResources() {
       reclaim: s.reclaimPolicy || '',
       bindingMode: s.volumeBindingMode || 'Immediate',
       status: 'Active',
+      age: age(s.metadata.creationTimestamp),
     }))
 
     const roles = rolesRes.items.map(r => ({
@@ -479,6 +488,7 @@ export async function fetchResources() {
         status,
         roles,
         version: n.status.nodeInfo?.kubeletVersion || '',
+        age: age(n.metadata.creationTimestamp),
       }
     })
 
@@ -487,6 +497,7 @@ export async function fetchResources() {
       name: n.metadata.name,
       namespace: '',
       status: n.status.phase || 'Unknown',
+      age: age(n.metadata.creationTimestamp),
     }))
 
     const crds = crdRes.items.map(c => ({
@@ -499,6 +510,7 @@ export async function fetchResources() {
       kind: c.spec.names.kind,
       namespaced: c.spec.scope === 'Namespaced',
       status: 'Active',
+      age: age(c.metadata.creationTimestamp),
     }))
 
     // Parse Helm releases from secrets
@@ -517,6 +529,7 @@ export async function fetchResources() {
           chart: labels.chart || '',
           version,
           status: normalizeHelmStatus(labels.status),
+          age: age(s.metadata.creationTimestamp),
         })
       }
     }
@@ -556,6 +569,7 @@ export async function fetchCrdInstances(group, version, plural) {
         name: r.metadata.name,
         namespace: r.metadata.namespace || '',
         status,
+        age: age(r.metadata.creationTimestamp),
       }
     })
   } catch (err) {

@@ -10,65 +10,65 @@ const COL_HEADERS = {
   pods:                ['STATUS', 'READY', 'RESTARTS', 'IP', 'NODE', 'AGE'],
   deployments:         ['STATUS', 'READY', 'UP-TO-DATE', 'AVAIL', 'AGE'],
   replicasets:         ['STATUS', 'READY', 'AGE'],
-  services:            ['TYPE', 'CLUSTER-IP', 'EXTERNAL-IP', 'PORTS'],
-  statefulsets:        ['STATUS', 'READY'],
-  daemonsets:          ['STATUS', 'DESIRED', 'READY'],
-  jobs:                ['STATUS', 'COMPLETIONS', 'DURATION'],
-  cronjobs:            ['STATUS', 'SCHEDULE', 'ACTIVE', 'LAST'],
-  hpa:                 ['TARGET', 'MIN–MAX', 'CURRENT'],
-  pdb:                 ['STATUS', 'CONSTRAINT', 'ALLOWED'],
-  ingresses:           ['HOSTS', 'ADDRESS', 'PORTS'],
+  services:            ['TYPE', 'CLUSTER-IP', 'EXTERNAL-IP', 'PORTS', 'AGE'],
+  statefulsets:        ['STATUS', 'READY', 'AGE'],
+  daemonsets:          ['STATUS', 'DESIRED', 'READY', 'AGE'],
+  jobs:                ['STATUS', 'COMPLETIONS', 'DURATION', 'AGE'],
+  cronjobs:            ['STATUS', 'SCHEDULE', 'ACTIVE', 'LAST', 'AGE'],
+  hpa:                 ['TARGET', 'MIN–MAX', 'CURRENT', 'AGE'],
+  pdb:                 ['STATUS', 'CONSTRAINT', 'ALLOWED', 'AGE'],
+  ingresses:           ['HOSTS', 'ADDRESS', 'PORTS', 'AGE'],
   networkpolicies:     ['INGRESS', 'EGRESS', 'AGE'],
   configmaps:          ['KEYS', 'AGE'],
-  secrets:             ['TYPE', 'KEYS'],
+  secrets:             ['TYPE', 'KEYS', 'AGE'],
   serviceaccounts:     ['SECRETS', 'AGE'],
-  resourcequotas:      ['CPU (used/hard)', 'MEMORY (used/hard)', 'PODS'],
-  pvcs:                ['STATUS', 'VOLUME', 'CAPACITY'],
-  pvs:                 ['STATUS', 'CLAIM', 'STORAGECLASS', 'CAPACITY'],
-  storageclasses:      ['PROVISIONER', 'RECLAIM', 'BINDING MODE'],
+  resourcequotas:      ['CPU (used/hard)', 'MEMORY (used/hard)', 'PODS', 'AGE'],
+  pvcs:                ['STATUS', 'VOLUME', 'CAPACITY', 'AGE'],
+  pvs:                 ['STATUS', 'CLAIM', 'STORAGECLASS', 'CAPACITY', 'AGE'],
+  storageclasses:      ['PROVISIONER', 'RECLAIM', 'BINDING MODE', 'AGE'],
   roles:               ['RULES', 'AGE'],
   clusterroles:        ['RULES', 'AGE'],
   rolebindings:        ['ROLEREF', 'SUBJECTS', 'AGE'],
   clusterrolebindings: ['ROLEREF', 'SUBJECTS', 'AGE'],
-  nodes:               ['STATUS', 'ROLES', 'VERSION'],
-  namespaces:          ['STATUS'],
-  events:              ['TYPE', 'REASON', 'OBJECT', 'COUNT'],
-  crds:                ['GROUP', 'VERSION', 'SCOPE'],
-  helmreleases:        ['CHART', 'VERSION', 'STATUS'],
+  nodes:               ['STATUS', 'ROLES', 'VERSION', 'AGE'],
+  namespaces:          ['STATUS', 'AGE'],
+  events:              ['TYPE', 'REASON', 'OBJECT', 'COUNT', 'AGE'],
+  crds:                ['GROUP', 'VERSION', 'SCOPE', 'AGE'],
+  helmreleases:        ['CHART', 'VERSION', 'STATUS', 'AGE'],
   containers:          ['STATUS', 'POD'],
-  __cr__:              ['STATUS'],
+  __cr__:              ['STATUS', 'AGE'],
 }
 const COL_WIDTHS = {
   pods:                [80, 44, 70, 110, 120, 55],
   deployments:         [80, 50, 72, 55, 55],
   replicasets:         [88, 60, 55],
-  services:            [88, 100, 130, 130],
-  statefulsets:        [88, 60],
-  daemonsets:          [88, 72, 60],
-  jobs:                [88, 100, 72],
-  cronjobs:            [88, 140, 60, 72],
-  hpa:                 [200, 80, 60],
-  pdb:                 [88, 140, 90],
-  ingresses:           [180, 120, 60],
+  services:            [88, 100, 130, 130, 55],
+  statefulsets:        [88, 60, 55],
+  daemonsets:          [88, 72, 60, 55],
+  jobs:                [88, 100, 72, 55],
+  cronjobs:            [88, 140, 60, 72, 55],
+  hpa:                 [200, 80, 60, 55],
+  pdb:                 [88, 140, 90, 55],
+  ingresses:           [180, 120, 60, 55],
   networkpolicies:     [70, 70, 55],
   configmaps:          [60, 72],
-  secrets:             [180, 60],
+  secrets:             [180, 60, 55],
   serviceaccounts:     [100, 55],
-  resourcequotas:      [150, 160, 90],
-  pvcs:                [88, 150, 90],
-  pvs:                 [88, 200, 110, 90],
-  storageclasses:      [220, 80, 180],
+  resourcequotas:      [150, 160, 90, 55],
+  pvcs:                [88, 150, 90, 55],
+  pvs:                 [88, 200, 110, 90, 55],
+  storageclasses:      [220, 80, 180, 55],
   roles:               [80, 55],
   clusterroles:        [80, 55],
   rolebindings:        [220, 90, 55],
   clusterrolebindings: [220, 90, 55],
-  nodes:               [88, 120, 100],
-  namespaces:          [88],
-  events:              [72, 140, 200, 50],
-  crds:                [180, 80, 80],
-  helmreleases:        [200, 80, 88],
+  nodes:               [88, 120, 100, 55],
+  namespaces:          [88, 55],
+  events:              [72, 140, 200, 50, 55],
+  crds:                [180, 80, 80, 55],
+  helmreleases:        [200, 80, 88, 55],
   containers:          [88, 200],
-  __cr__:              [88],
+  __cr__:              [88, 55],
 }
 
 function SortArrow({ active, dir }) {
@@ -76,7 +76,10 @@ function SortArrow({ active, dir }) {
   return <span style={{ color: '#00d4ff', marginLeft: 3 }}>{dir === 'asc' ? '▲' : '▼'}</span>
 }
 
-function ColumnHeader({ resource, sortKey, sortDir, onSort }) {
+// Width of the NAMESPACE column shown in flat (ungrouped) mode.
+const NS_COL_W = 150
+
+function ColumnHeader({ resource, sortKey, sortDir, onSort, showNsColumn }) {
   const key = resource.startsWith('cr:') ? '__cr__' : resource
   const headers = COL_HEADERS[key] || []
   const widths  = COL_WIDTHS[key]  || []
@@ -91,6 +94,14 @@ function ColumnHeader({ resource, sortKey, sortDir, onSort }) {
     }}>
       <span style={{ width: 14, flexShrink: 0 }} />
       <span style={{ width: 8,  flexShrink: 0, marginRight: 10 }} />
+      {showNsColumn && (
+        <span style={{
+          width: NS_COL_W, flexShrink: 0, fontSize: 10, letterSpacing: '0.08em',
+          color: '#4a7a9a', paddingRight: 8,
+        }}>
+          NAMESPACE
+        </span>
+      )}
       <span
         onClick={() => onSort('name')}
         title="Sort by name (Shift+N)"
@@ -160,6 +171,7 @@ export function ResourceList() {
   const sortKey            = useStore(s => s.sortKey)
   const sortDir            = useStore(s => s.sortDir)
   const faultsOnly         = useStore(s => s.faultsOnly)
+  const groupByNamespace   = useStore(s => s.groupByNamespace)
   const setSelected        = useStore(s => s.setSelected)
   const setSort            = useStore(s => s.setSort)
   const toggleMultiSelect  = useStore(s => s.toggleMultiSelect)
@@ -186,11 +198,18 @@ export function ResourceList() {
       )
     }
     if (faultsOnly) items = items.filter(isFault)
-    return arrangeForDisplay(items, { activeNamespace, sortKey, sortDir })
-  }, [allItems, activeNamespace, filter, faultsOnly, sortKey, sortDir])
+    return arrangeForDisplay(items, { activeNamespace, sortKey, sortDir, groupByNamespace })
+  }, [allItems, activeNamespace, filter, faultsOnly, sortKey, sortDir, groupByNamespace])
 
-  // Build namespace groups, preserving the arranged order of displayItems.
+  // Grouped (namespace headers) only when opted in via ctrl+g; otherwise a flat
+  // k9s-style list with NAMESPACE as a column.
+  const showNsHeaders = groupByNamespace && activeNamespace === 'all' && allNamespaces.length > 0
+  const showNsColumn  = !groupByNamespace && activeNamespace === 'all' && allNamespaces.length > 0
+
+  // In grouped mode, bucket by namespace (alphabetical). In flat mode, render a single
+  // group so the globally-sorted displayItems order is preserved verbatim.
   const groups = useMemo(() => {
+    if (!showNsHeaders) return [['', displayItems]]
     const map = {}
     displayItems.forEach(item => {
       const key = item.namespace || ''
@@ -198,18 +217,16 @@ export function ResourceList() {
       map[key].push(item)
     })
     return Object.entries(map).sort(([a], [b]) => a.localeCompare(b))
-  }, [displayItems])
-
-  const showNsHeaders = activeNamespace === 'all' && allNamespaces.length > 0
+  }, [displayItems, showNsHeaders])
 
   const displayName = activeResource.startsWith('cr:') ? activeResource.slice(3).split('/').pop() : activeResource
   let rowIndex = 0
 
   return (
     <div style={{ position: 'absolute', inset: 0, overflowY: 'auto', overflowX: 'hidden' }}>
-      <ColumnHeader resource={activeResource} sortKey={sortKey} sortDir={sortDir} onSort={setSort} />
+      <ColumnHeader resource={activeResource} sortKey={sortKey} sortDir={sortDir} onSort={setSort} showNsColumn={showNsColumn} />
 
-      {groups.length === 0 && (
+      {displayItems.length === 0 && (
         <div style={{ padding: '40px 20px', textAlign: 'center', fontSize: 12, color: '#3a5a7a', fontFamily: 'inherit' }}>
           {faultsOnly ? `No ${displayName} with faults`
             : filter ? `No ${displayName} match "${filter}"`
@@ -240,6 +257,8 @@ export function ResourceList() {
                   scrollIntoView={isSelected}
                   animDelay={delay}
                   firstInGroup={showNsHeaders && !!ns && itemIdx === 0}
+                  nsColumnWidth={showNsColumn ? NS_COL_W : 0}
+                  nsColor={showNsColumn && item.namespace ? getNsColor(item.namespace, allNamespaces) : null}
                   onSelect={() => setSelected(isSelected ? null : item.id)}
                   onToggleMulti={() => toggleMultiSelect(item.id)}
                 />

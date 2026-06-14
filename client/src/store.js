@@ -93,12 +93,13 @@ export function sortItems(items, sortKey, sortDir) {
 }
 
 // Produce the flat list in the exact order it is displayed: grouped by namespace
-// (namespace name order, matching ResourceList) when the "all namespaces" view is
-// active and namespaced items exist, otherwise flat — sorted within each section.
+// (namespace name order, matching ResourceList) only when namespace grouping is opted
+// into AND the "all namespaces" view is active AND namespaced items exist — otherwise a
+// flat list (k9s default) sorted as a whole.
 // Keeping nav (j/k) and the visible list in lockstep depends on this single ordering.
-export function arrangeForDisplay(items, { activeNamespace, sortKey, sortDir }) {
+export function arrangeForDisplay(items, { activeNamespace, sortKey, sortDir, groupByNamespace }) {
   const namespaced = items.some(i => i.namespace)
-  const grouped = activeNamespace === 'all' && namespaced
+  const grouped = groupByNamespace && activeNamespace === 'all' && namespaced
   if (!grouped) return sortItems(items, sortKey, sortDir)
   const groups = {}
   items.forEach(i => { const k = i.namespace || ''; (groups[k] ||= []).push(i) })
@@ -155,6 +156,10 @@ export const useStore = create((set, get) => ({
   sortDir: 'asc',     // 'asc' | 'desc'
   faultsOnly: false,  // ctrl+z: show only unhealthy resources
 
+  // View: flat k9s-style list (namespace as a column) by default; opt into
+  // namespace-grouped headers with ctrl+g.
+  groupByNamespace: false,
+
   // Help overlay
   helpOpen: false,
 
@@ -206,6 +211,7 @@ export const useStore = create((set, get) => ({
     : { sortKey: key, sortDir: 'asc' }),
   clearSort: () => set({ sortKey: null, sortDir: 'asc' }),
   toggleFaults: () => set(s => ({ faultsOnly: !s.faultsOnly })),
+  toggleGroupByNamespace: () => set(s => ({ groupByNamespace: !s.groupByNamespace })),
   setHelpOpen: (v) => set({ helpOpen: v }),
 
   setCommandActive: (v) => set({ commandActive: v, command: '' }),
@@ -514,6 +520,6 @@ export const useStore = create((set, get) => ({
       )
     }
     if (s.faultsOnly) items = items.filter(isFault)
-    return arrangeForDisplay(items, { activeNamespace: s.activeNamespace, sortKey: s.sortKey, sortDir: s.sortDir })
+    return arrangeForDisplay(items, { activeNamespace: s.activeNamespace, sortKey: s.sortKey, sortDir: s.sortDir, groupByNamespace: s.groupByNamespace })
   },
 }))

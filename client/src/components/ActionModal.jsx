@@ -1,6 +1,7 @@
-import { useEffect, useState, useRef, useCallback, useMemo, useLayoutEffect } from 'react'
+import { useEffect, useState, useRef, useCallback, useMemo } from 'react'
 import { useStore } from '../store'
-import * as vim from '../lib/vim'
+import { VimEditor } from './VimEditor'
+import { VimHelpOverlay } from './VimHelpOverlay'
 
 const MULTI_LOG_RESOURCES = new Set(['deployments', 'statefulsets', 'daemonsets', 'services', 'jobs'])
 const CLUSTER_SCOPED      = new Set(['nodes', 'pvs', 'namespaces', 'crds'])
@@ -61,52 +62,6 @@ function transformSecretJsonData(json, decode) {
 }
 
 // ── Renderers ────────────────────────────────────────────────────────────────
-
-// Shared text metrics for the edit textarea and its highlight backdrop. They must
-// match exactly so the (transparent) overlay marks line up under the textarea text.
-const EDITOR_TEXT_STYLE = {
-  fontFamily: "'Courier New', monospace",
-  fontSize: 11,
-  lineHeight: 1.7,
-  padding: 8,
-  whiteSpace: 'pre-wrap',
-  overflowWrap: 'break-word',
-  boxSizing: 'border-box',
-}
-
-// Render the edit content as a backdrop where every search match is wrapped in a
-// transparent <mark> (the real text shows through from the textarea on top). The
-// current match gets `currentRef` so callers can measure its real position
-// (offsetTop) — accurate even when long lines soft-wrap, where line*lineHeight
-// math would scroll the match off screen.
-function renderEditHighlightLines(text, term, currentMatchIndex, currentRef) {
-  if (!term) return null
-  const lq = term.toLowerCase()
-  let counter = 0
-  return text.split('\n').map((line, li) => {
-    const lc = line.toLowerCase()
-    const parts = []
-    let pos = 0
-    let hit = lc.indexOf(lq, pos)
-    while (hit !== -1) {
-      if (hit > pos) parts.push(line.slice(pos, hit))
-      const isCurrent = counter === currentMatchIndex
-      counter++
-      parts.push(
-        <mark key={hit} ref={isCurrent ? currentRef : undefined} style={{
-          background: isCurrent ? 'rgba(255,204,68,0.65)' : 'rgba(255,204,68,0.30)',
-          color: 'transparent', borderRadius: 2,
-        }}>
-          {line.slice(hit, hit + term.length)}
-        </mark>
-      )
-      pos = hit + term.length
-      hit = lc.indexOf(lq, pos)
-    }
-    if (pos < line.length) parts.push(line.slice(pos))
-    return <div key={li}>{parts.length ? parts : (line || ' ')}</div>
-  })
-}
 
 function highlight(text, term, isCurrent) {
   if (!term) return <span>{text}</span>
@@ -282,14 +237,10 @@ export function ActionModal() {
   const [editSaving,     setEditSaving]     = useState(false)
   const [editResult,     setEditResult]     = useState(null)
   const [editVimMode,    setEditVimMode]    = useState(true)
-  const [editInsertMode, setEditInsertMode] = useState(false)
-
-  // Vim edit cursor / mode (#40, #55)
-  const [editCursor,   setEditCursor]   = useState(0)     // char offset the block cursor sits on
-  const [vimVisual,    setVimVisual]    = useState(null)  // visual-mode anchor offset, or null
-  const [vimRegister,  setVimRegister]  = useState(null)  // { text, linewise } yank/delete register
-  const [cmdActive,    setCmdActive]    = useState(false) // ':' command line open
-  const [cmd,          setCmd]          = useState('')
+  // CodeMirror owns the edit buffer & vim engine (#61). We only mirror its current
+  // vim sub-mode here so the footer can show NORMAL / INSERT / VISUAL.
+  const [vimMode,        setVimMode]        = useState('normal')
+  const [vimHelp,        setVimHelp]        = useState(false)  // vim cheatsheet overlay
 
   // Secret decode
   const [secretDecoded, setSecretDecoded] = useState(false)
@@ -318,12 +269,7 @@ export function ActionModal() {
   const scrollRef   = useRef()
   const filterRef   = useRef()   // log filter input
   const searchRef   = useRef()   // describe/yaml search input
-  const cmdRef      = useRef()   // ':' command line input
-  const lastOpRef   = useRef({ key: '', t: 0 })  // dd/yy/gg double-tap tracking
-  const editRef     = useRef()
-  const lineNumRef  = useRef()   // line number gutter (edit mode)
-  const highlightRef = useRef()  // search highlight backdrop (edit mode)
-  const editMatchRef = useRef()  // current match <mark> in the edit backdrop
+  const editViewRef = useRef()   // CodeMirror EditorView (edit mode)
   const lastGRef    = useRef(0)
   const matchRefs   = useRef({})
   const fetchedRef  = useRef({})  // `${itemId}|${format}` → true, avoids refetching a loaded view
@@ -359,42 +305,20 @@ export function ActionModal() {
     return rawViewContent
   }, [rawViewContent, secretDecoded, modal?.resource, isInspect, viewFormat])
   const contentLines     = useMemo(() => displayContent ? displayContent.split('\n') : [], [displayContent])
-  const editContentLines = useMemo(() => editContent ? editContent.split('\n') : [], [editContent])
+  // Read-view search (describe/yaml/json + logs). Edit-mode search is owned by CodeMirror.
   const searchMatchLineIndices = useMemo(() => {
     const activeSearch = modal?.type === 'logs' ? logFilter : search
     if (!activeSearch) return []
     const q = activeSearch.toLowerCase()
-    const lines = editMode ? editContentLines : contentLines
-    return lines.reduce((acc, line, i) => {
+    return contentLines.reduce((acc, line, i) => {
       if (line.toLowerCase().includes(q)) acc.push(i)
       return acc
     }, [])
-  }, [contentLines, editContentLines, search, logFilter, editMode])
-
-  // Character-level match positions for edit vim mode selection highlighting
-  const editSearchMatches = useMemo(() => {
-    if (!search || !editMode) return []
-    const q = search.toLowerCase()
-    const text = editContent.toLowerCase()
-    const matches = []
-    let idx = 0
-    while ((idx = text.indexOf(q, idx)) !== -1) {
-      matches.push({ start: idx, end: idx + q.length })
-      idx += q.length
-    }
-    return matches
-  }, [editContent, search, modal?.type])
+  }, [contentLines, search, logFilter])
 
   // For logs, matching lines come from filteredLogLines
   const logMatchCount    = filteredLogLines.length
-  const nonLogMatchCount = modal?.type === 'edit' ? editSearchMatches.length : searchMatchLineIndices.length
-
-  // Highlight backdrop for the edit textarea (current match brightened)
-  const editOverlayLines = useMemo(
-    () => renderEditHighlightLines(editContent, editMode ? search : '',
-      editSearchMatches.length ? matchIndex % editSearchMatches.length : -1, editMatchRef),
-    [editContent, search, editMode, matchIndex, editSearchMatches.length]
-  )
+  const nonLogMatchCount = searchMatchLineIndices.length
 
   // Map line index → match number for describe/yaml rendering
   const lineToMatchIdx = useMemo(() => {
@@ -433,7 +357,6 @@ export function ActionModal() {
       const res  = await fetch(`/api/yaml/${modal.resource}/${nsParam}/${modal.item.name}`)
       const data = await res.json()
       setContent(data.output || '')
-      setEditContent(data.output || '')
     } catch (err) { setFetchError(err.message) }
     finally      { setLoading(false) }
   }, [modal, nsParam])
@@ -519,8 +442,7 @@ export function ActionModal() {
     setFetchError(null); setLogPods([])
     setLogFilter(''); setLogPodFilter('all')
     setSearch(''); setSearchActive(false); setMatchIndex(0)
-    setEditResult(null); setEditInsertMode(false)
-    setEditCursor(0); setVimVisual(null); setCmdActive(false); setCmd('')
+    setEditResult(null); setVimMode('normal'); setVimHelp(false)
     setSecretDecoded(!!modal.decoded); setHelmHistory([]); setHelmRollbackStatus({})
     setHistoryValues(null)
     setHelmAllValues(false); prevAllValues.current = null
@@ -534,9 +456,11 @@ export function ActionModal() {
   }, [modal?.type, modal?.item?.id])
 
   // Lazily fetch the active inspect view (describe/yaml/json); cached per item+format.
+  // Edit mode edits the current format (yaml or json); describe isn't editable so it
+  // falls back to yaml.
   useEffect(() => {
     if (!modal || !isInspect) return
-    const fmt = editMode ? 'yaml' : viewFormat
+    const fmt = (editMode && viewFormat === 'describe') ? 'yaml' : viewFormat
     const key = `${modal.item.id}|${fmt}`
     if (fetchedRef.current[key]) return
     fetchedRef.current[key] = true
@@ -544,6 +468,14 @@ export function ActionModal() {
     else if (fmt === 'describe') fetchDescribe()
     else                         fetchYaml()
   }, [modal?.item?.id, modal?.type, viewFormat, editMode, isInspect])
+
+  // Seed the edit buffer from the active format's raw content. Re-runs if the fetch
+  // arrives after edit opens (e.g. describe→edit forces a fresh yaml fetch). Content
+  // is stable during an edit session (no refetch), so this won't clobber edits.
+  useEffect(() => {
+    if (!editMode) return
+    setEditContent(viewFormat === 'json' ? jsonContent : content)
+  }, [editMode, viewFormat, content, jsonContent])
 
   // Re-fetch helm values when toggling user ↔ all (skips the initial mount fetch)
   useEffect(() => {
@@ -590,54 +522,10 @@ export function ActionModal() {
     el?.scrollIntoView({ behavior: 'smooth', block: 'center' })
   }, [matchIndex, modal?.type, logFilter])
 
-  // Scroll the edit textarea (and its synced gutter/backdrop) to center the current
-  // match. Measure the rendered <mark>'s offsetTop so wrapped lines stay accurate.
-  useEffect(() => {
-    if (!editMode || !editRef.current || editSearchMatches.length === 0) return
-    const markEl = editMatchRef.current
-    if (!markEl) return
-    const top = Math.max(0, markEl.offsetTop - editRef.current.clientHeight / 2)
-    editRef.current.scrollTop = top
-    if (highlightRef.current) highlightRef.current.scrollTop = top
-    if (lineNumRef.current)   lineNumRef.current.scrollTop   = top
-  }, [matchIndex, editSearchMatches, modal?.type, editMode, editOverlayLines])
-
   // Focus search input when activated
   useEffect(() => {
     if (searchActive) setTimeout(() => searchRef.current?.focus(), 30)
   }, [searchActive])
-
-  // Render the vim block cursor (NORMAL: 1-char selection; VISUAL: anchor→cursor span).
-  // Keeps the textarea focused so the selection highlight is the visible cursor (#55).
-  useLayoutEffect(() => {
-    if (!editMode || !editVimMode || editInsertMode) return
-    const ta = editRef.current; if (!ta) return
-    // Don't steal focus while the search/command input is open — just keep the selection synced.
-    if (document.activeElement !== ta && !searchActive && !cmdActive) ta.focus({ preventScroll: true })
-    const len = editContent.length
-    const cur = Math.min(editCursor, Math.max(0, len - 1))
-    if (vimVisual !== null) {
-      ta.setSelectionRange(Math.min(vimVisual, cur), Math.min(Math.max(vimVisual, cur) + 1, len))
-    } else {
-      const hi = (cur >= len || editContent[cur] === '\n') ? cur : cur + 1
-      ta.setSelectionRange(cur, hi)
-    }
-  }, [editCursor, vimVisual, editInsertMode, editMode, editVimMode, editContent, searchActive, cmdActive])
-
-  // On entering INSERT, focus the textarea and collapse the caret at the cursor.
-  useLayoutEffect(() => {
-    if (!editMode || !editInsertMode) return
-    const ta = editRef.current; if (!ta) return
-    ta.focus()
-    if (editVimMode) { const p = Math.min(editCursor, editContent.length); ta.setSelectionRange(p, p) }
-  }, [editInsertMode])
-
-  // Search in edit mode moves the real cursor to the active match (#40).
-  useEffect(() => {
-    if (!editMode || !editVimMode || !search || editSearchMatches.length === 0) return
-    const m = editSearchMatches[matchIndex % editSearchMatches.length]
-    if (m) setEditCursor(m.start)
-  }, [matchIndex, search, editMode, editVimMode, editSearchMatches])
 
   // ── Copy ─────────────────────────────────────────────────────────────────
 
@@ -662,61 +550,33 @@ export function ActionModal() {
 
     const onKey = e => {
       const tag     = document.activeElement?.tagName
-      const inEdit  = tag === 'TEXTAREA'
       const inInput = tag === 'INPUT' || tag === 'SELECT'
-
       const inspect = modal.type === 'describe' || modal.type === 'yaml' || modal.type === 'edit'
 
-      // Esc: step back through states
+      // Edit mode: CodeMirror owns every key (vim motions/operators, Esc, ':' ex,
+      // '/' search, '?' help). Yield entirely so nothing here intercepts first.
+      if (editMode) return
+
+      // Esc: step back through read-view / logs states, then close.
       if (e.key === 'Escape') {
         e.preventDefault(); e.stopPropagation()
-        if (cmdActive) { setCmdActive(false); setCmd(''); editRef.current?.focus(); return }
-        // Close search first (in edit mode, return focus so the block cursor stays on the match).
-        if (searchActive || search) {
-          setSearchActive(false); setSearch(''); setMatchIndex(0)
-          if (editMode) editRef.current?.focus()
-          return
-        }
-        if (editMode && editVimMode && editInsertMode) {
-          // INSERT → NORMAL: keep focus, move the block cursor left one (vim behavior)
-          const sel = editRef.current?.selectionStart ?? editCursor
-          setEditInsertMode(false)
-          setEditCursor(vim.clampToLine(editContent, Math.max(0, sel - 1)))
-          return
-        }
-        if (editMode && editVimMode && !editInsertMode && vimVisual !== null) {
-          setVimVisual(null); return            // exit visual mode
-        }
-        if (editMode) {                          // NORMAL or non-vim edit → back to read view
-          editRef.current?.blur()
-          setEditMode(false)
-          return
-        }
+        if (searchActive || search) { setSearchActive(false); setSearch(''); setMatchIndex(0); return }
         if (logFilter) { setLogFilter(''); setMatchIndex(0); return }
         closeModal()
         return
       }
 
-      // Inside inputs: let browser handle
       if (inInput) return
-      // Inside textarea: only block if not in vim normal mode
-      if (inEdit && !(editVimMode && !editInsertMode)) return
-      // In vim normal mode: block keys that would otherwise mutate the buffer
-      if (inEdit && editVimMode && !editInsertMode &&
-          (e.key.length === 1 || ['Backspace', 'Delete', 'Enter', 'Tab'].includes(e.key)) &&
-          !e.ctrlKey && !e.metaKey) {
-        e.preventDefault()
-      }
 
-      // Tab: in the Helm values modal, toggle USER ↔ ALL (computed) values
+      // Tab: in the Helm values modal, toggle USER / ALL (computed) values
       if (modal.type === 'helm-values' && e.key === 'Tab') {
         e.preventDefault(); e.stopPropagation()
         setHelmAllValues(v => !v)
         return
       }
 
-      // Tab / Shift+Tab: cycle describe → yaml → json in the read view
-      if (inspect && !editMode && e.key === 'Tab') {
+      // Tab / Shift+Tab: cycle describe / yaml / json in the read view
+      if (inspect && e.key === 'Tab') {
         e.preventDefault(); e.stopPropagation()
         const order = ['describe', 'yaml', 'json']
         const i = order.indexOf(viewFormat)
@@ -727,109 +587,27 @@ export function ActionModal() {
         return
       }
 
-      // 'e' from a read view: enter edit mode (forces YAML, line numbers on by default).
-      if (inspect && !editMode && e.key === 'e') {
+      // 'e' from a read view: enter edit mode in the current format (json stays json).
+      // describe isn't editable, so it falls back to yaml. Line numbers on by default.
+      if (inspect && e.key === 'e') {
         e.preventDefault(); e.stopPropagation()
-        setViewFormat('yaml')
+        if (viewFormat === 'describe') setViewFormat('yaml')
         setEditMode(true)
         setShowLineNumbers(true)
-        setEditCursor(0); setVimVisual(null)
-        return
-      }
-
-      // 'i' in edit vim NORMAL: enter INSERT mode at the cursor (insert-caret effect focuses).
-      if (inspect && editMode && editVimMode && !editInsertMode && e.key === 'i') {
-        e.preventDefault(); e.stopPropagation()
-        setVimVisual(null)
-        setEditInsertMode(true)
         return
       }
 
       // 'x': toggle secret base64 decode (k9s-style). YAML and JSON decode in place; only
       // DESCRIBE (no decodable data block) snaps to YAML decoded.
       if (inspect && modal.resource === 'secrets' && e.key === 'x') {
-        const allow = !editMode || (editVimMode && !editInsertMode)
-        if (allow) {
-          e.preventDefault(); e.stopPropagation()
-          if (!editMode && viewFormat === 'describe') {
-            setViewFormat('yaml'); setSecretDecoded(true)
-          } else {
-            if (editMode) setEditContent(c => transformSecretDataSection(c, !secretDecoded))
-            setSecretDecoded(v => !v)
-          }
-          return
-        }
-      }
-
-      // ── Edit vim NORMAL/VISUAL: cursor motions + operators (#40, #55) ─────────
-      // ctrl/meta combos fall through to the scroll switch below (Ctrl-d/u/f/b page scroll).
-      if (editMode && editVimMode && !editInsertMode && !cmdActive && !e.ctrlKey && !e.metaKey) {
         e.preventDefault(); e.stopPropagation()
-        const t = editContent
-        const c = Math.min(editCursor, Math.max(0, t.length - 1))
-        const visual = vimVisual !== null
-        const move = p => setEditCursor(p)
-        const apply = r => {
-          if (r.text !== undefined && r.text !== t) { setEditContent(r.text); setEditResult(null) }
-          if (r.pos  !== undefined) setEditCursor(r.pos)
-          if (r.yank) setVimRegister({ text: r.yank, linewise: !!r.linewise })
-          setVimVisual(null)
-        }
-        const enterInsert = p => { setEditCursor(p); setVimVisual(null); setEditInsertMode(true) }
-        const dbl = k => {
-          const now = Date.now()
-          const hit = lastOpRef.current.key === k && now - lastOpRef.current.t < 500
-          lastOpRef.current = hit ? { key: '', t: 0 } : { key: k, t: now }
-          return hit
-        }
-        const jumpMatch = delta => {
-          const tot = editSearchMatches.length
-          if (!tot) return
-          const ni = (matchIndex + delta + tot) % tot
-          setMatchIndex(ni)
-          setEditCursor(editSearchMatches[ni].start)
-        }
-
-        switch (e.key) {
-          case 'h': case 'ArrowLeft':  return move(vim.left(t, c))
-          case 'l': case 'ArrowRight': return move(vim.right(t, c))
-          case 'j': case 'ArrowDown':  return move(vim.down(t, c))
-          case 'k': case 'ArrowUp':    return move(vim.up(t, c))
-          case 'w': return move(vim.wordForward(t, c))
-          case 'b': return move(vim.wordBack(t, c))
-          case '0': return move(vim.lineStart(t, c))
-          case '^': return move(vim.firstNonBlank(t, c))
-          case '$': return move(vim.lineEnd(t, c))
-          case 'G': return move(vim.fileEnd(t))
-          case 'g': if (dbl('g')) return move(vim.fileStart()); return
-          case 'a': return enterInsert(Math.min(c + 1, t.length))
-          case 'A': return enterInsert(vim.lineEndOf(t, c))
-          case 'I': return enterInsert(vim.firstNonBlank(t, c))
-          case 'o': { const r = vim.openBelow(t, c); setEditContent(r.text); setEditResult(null); return enterInsert(r.pos) }
-          case 'O': { const r = vim.openAbove(t, c); setEditContent(r.text); setEditResult(null); return enterInsert(r.pos) }
-          case 'v': return setVimVisual(visual ? null : c)
-          case 'x': return apply(visual ? vim.deleteRange(t, vimVisual, c) : vim.deleteCharAt(t, c))
-          case 'D': return apply(vim.deleteToLineEnd(t, c))
-          case 'd':
-            if (visual) return apply(vim.deleteRange(t, vimVisual, c))
-            if (dbl('d')) return apply(vim.deleteLine(t, c))
-            return
-          case 'y':
-            if (visual) { setVimRegister({ text: vim.rangeText(t, vimVisual, c), linewise: false }); setVimVisual(null); return move(Math.min(vimVisual, c)) }
-            if (dbl('y')) { const r = vim.yankLine(t, c); setVimRegister({ text: r.text, linewise: true }); return }
-            return
-          case 'p': return apply(vim.put(t, c, vimRegister, false))
-          case 'P': return apply(vim.put(t, c, vimRegister, true))
-          case ':': setCmdActive(true); setCmd(''); setTimeout(() => cmdRef.current?.focus(), 20); return
-          case '/': setSearchActive(true); return
-          case 'n': return jumpMatch(1)
-          case 'N': return jumpMatch(-1)
-          default: return    // consume any other key so it can't mutate the buffer
-        }
+        if (viewFormat === 'describe') { setViewFormat('yaml'); setSecretDecoded(true) }
+        else setSecretDecoded(v => !v)
+        return
       }
 
-      // Scroll target: textarea in edit vim mode, otherwise the main scroll div
-      const scrollEl = (editMode && editVimMode) ? editRef.current : scrollRef.current
+      // ── Read-view / logs scroll + search nav ──────────────────────────────
+      const scrollEl = scrollRef.current
       if (!scrollEl) return
       const halfPage = scrollEl.clientHeight / 2
 
@@ -869,51 +647,49 @@ export function ActionModal() {
         case 'b':
           if (e.ctrlKey) { e.preventDefault(); e.stopPropagation(); scrollEl.scrollBy({ top: -scrollEl.clientHeight }) }
           break
-        case '/': {
-          const allowSearch = !editMode || (editVimMode && !editInsertMode)
-          if (allowSearch) {
-            e.preventDefault(); e.stopPropagation()
-            if (modal.type === 'logs') filterRef.current?.focus()
-            else setSearchActive(true)
-          }
+        case '/':
+          e.preventDefault(); e.stopPropagation()
+          if (modal.type === 'logs') filterRef.current?.focus()
+          else setSearchActive(true)
           break
-        }
         case 'n': {
-          const allowNav = !editMode || (editVimMode && !editInsertMode)
-          if (allowNav) {
-            e.preventDefault(); e.stopPropagation()
-            const total = modal.type === 'logs' ? logMatchCount : nonLogMatchCount
-            if (total > 0) setMatchIndex(i => (i + 1) % total)
-          }
+          e.preventDefault(); e.stopPropagation()
+          const total = modal.type === 'logs' ? logMatchCount : nonLogMatchCount
+          if (total > 0) setMatchIndex(i => (i + 1) % total)
           break
         }
         case 'N': {
-          const allowNav = !editMode || (editVimMode && !editInsertMode)
-          if (allowNav) {
-            e.preventDefault(); e.stopPropagation()
-            const total = modal.type === 'logs' ? logMatchCount : nonLogMatchCount
-            if (total > 0) setMatchIndex(i => (i - 1 + total) % total)
-          }
+          e.preventDefault(); e.stopPropagation()
+          const total = modal.type === 'logs' ? logMatchCount : nonLogMatchCount
+          if (total > 0) setMatchIndex(i => (i - 1 + total) % total)
           break
         }
         case 'c':
-          if (!e.ctrlKey && !editMode) { e.preventDefault(); e.stopPropagation(); doCopy() }
+          if (!e.ctrlKey) { e.preventDefault(); e.stopPropagation(); doCopy() }
           break
       }
     }
 
     window.addEventListener('keydown', onKey, true)
     return () => window.removeEventListener('keydown', onKey, true)
-  }, [modal, closeModal, searchActive, search, logFilter, logMatchCount, nonLogMatchCount, doCopy, editVimMode, editInsertMode, editMode, viewFormat, secretDecoded, searchMatchLineIndices, editSearchMatches, editContent, editCursor, vimVisual, vimRegister, cmdActive, matchIndex])
+  }, [modal, closeModal, searchActive, search, logFilter, logMatchCount, nonLogMatchCount, doCopy, editMode, viewFormat, matchIndex])
 
   // ── Save ──────────────────────────────────────────────────────────────────
+
+  // Read the live editor text (CodeMirror owns the buffer) with a state fallback.
+  const editText = () => editViewRef.current?.state.doc.toString() ?? editContent
+  // Secret decode/encode is format-specific (yaml `data:` block vs json `data` object).
+  const transformSecret = (text, decode) => viewFormat === 'json'
+    ? transformSecretJsonData(text, decode)
+    : transformSecretDataSection(text, decode)
 
   const handleSave = async () => {
     setEditSaving(true); setEditResult(null)
     try {
+      const text = editText()
       const body = (modal?.resource === 'secrets' && secretDecoded)
-        ? transformSecretDataSection(editContent, false)
-        : editContent
+        ? transformSecret(text, false)
+        : text
       const res  = await fetch('/api/edit', { method: 'POST', headers: { 'Content-Type': 'text/plain' }, body })
       const data = await res.json()
       setEditResult(data)
@@ -922,15 +698,10 @@ export function ActionModal() {
     finally      { setEditSaving(false) }
   }
 
-  // ':' command line — :w save, :wq/:x save+close, :q/:q! back to read view
-  const runCmd = async () => {
-    const c = cmd.trim().replace(/^:/, '')
-    setCmdActive(false); setCmd('')
-    if (c === 'w')                       { await handleSave() }
-    else if (c === 'wq' || c === 'x')    { const r = await handleSave(); if (r?.ok) closeModal() }
-    else if (c === 'q' || c === 'q!')    { setEditMode(false) }
-    editRef.current?.focus()
-  }
+  // Vim ex-commands, dispatched from VimEditor: :w save, :wq/:x save+close, :q/:q! back to read.
+  const onVimSave      = () => { handleSave() }
+  const onVimSaveClose = async () => { const r = await handleSave(); if (r?.ok) closeModal() }
+  const onVimQuit      = () => { setEditMode(false) }
 
   // ── Render ────────────────────────────────────────────────────────────────
 
@@ -951,7 +722,7 @@ export function ActionModal() {
   const typeLabel = type === 'helm-values' ? (helmAllValues ? 'ALL VALUES' : 'VALUES')
     : type === 'helm-manifest' ? 'MANIFEST' : type === 'helm-notes' ? 'NOTES'
     : type === 'helm-history' ? 'HISTORY'
-    : isInspect ? (editMode ? 'EDIT' : viewFormat.toUpperCase())
+    : isInspect ? (editMode ? `EDIT ${viewFormat.toUpperCase()}` : viewFormat.toUpperCase())
     : type.toUpperCase()
 
   const containerOptions = item.containers?.length > 1
@@ -966,8 +737,9 @@ export function ActionModal() {
   const totalMatches  = type === 'logs' ? logMatchCount : nonLogMatchCount
   const isSecret      = resource === 'secrets'
 
-  const editNormal = editMode && editVimMode && !editInsertMode && vimVisual === null
-  const editInsert = editMode && editVimMode && editInsertMode
+  const editNormal = editMode && editVimMode && vimMode === 'normal'
+  const editInsert = editMode && editVimMode && vimMode === 'insert'
+  const editVisual = editMode && editVimMode && vimMode === 'visual'
 
   // For logs, filtered lines carry their own match index (mutable counter in render)
   let logMatchN = -1
@@ -1016,7 +788,9 @@ export function ActionModal() {
               <button
                 onClick={() => {
                   if (editMode) {
-                    setEditContent(c => transformSecretDataSection(c, !secretDecoded))
+                    // CodeMirror owns the buffer: transform the live text and push it back
+                    // through the `value` prop (VimEditor syncs it into the doc).
+                    setEditContent(transformSecret(editText(), !secretDecoded))
                   }
                   setSecretDecoded(v => !v)
                 }}
@@ -1153,58 +927,20 @@ export function ActionModal() {
               )}
 
               {isInspect && editMode && (
-                <div style={{ display: 'flex', height: '100%', minHeight: 400, border: '1px solid rgba(0,212,255,0.15)', borderRadius: 4, overflow: 'hidden' }}>
-                  {showLineNumbers && (
-                    <div
-                      ref={lineNumRef}
-                      style={{
-                        overflowY: 'hidden', flexShrink: 0, width: 40,
-                        background: 'rgba(0,0,0,0.25)', borderRight: '1px solid rgba(0,212,255,0.08)',
-                        padding: '8px 6px 8px 0', textAlign: 'right', userSelect: 'none',
-                        color: '#2a4a6a', fontSize: 11, lineHeight: 1.7,
-                        fontFamily: "'Courier New', monospace",
-                      }}
-                    >
-                      {editContentLines.map((_, i) => <div key={i}>{i + 1}</div>)}
-                    </div>
-                  )}
-                  {/* Relative wrapper: transparent textarea on top of a highlight backdrop */}
-                  <div style={{ position: 'relative', flex: 1, overflow: 'hidden' }}>
-                    <div
-                      ref={highlightRef}
-                      aria-hidden
-                      style={{
-                        position: 'absolute', inset: 0, overflow: 'hidden',
-                        color: 'transparent', pointerEvents: 'none', ...EDITOR_TEXT_STYLE,
-                      }}
-                    >
-                      {editOverlayLines}
-                    </div>
-                    <style>{`.vim-edit::selection{background:rgba(0,212,255,0.45);color:#02101a}`}</style>
-                    <textarea
-                      ref={editRef}
-                      className="vim-edit"
-                      value={editContent}
-                      onChange={e => { setEditContent(e.target.value); setEditResult(null) }}
-                      onScroll={e => {
-                        if (lineNumRef.current)   lineNumRef.current.scrollTop   = e.target.scrollTop
-                        if (highlightRef.current) highlightRef.current.scrollTop = e.target.scrollTop
-                      }}
-                      onMouseUp={e => {
-                        // Click to reposition the block cursor in vim NORMAL mode.
-                        if (editVimMode && !editInsertMode)
-                          setEditCursor(vim.clampToLine(editContent, e.target.selectionStart))
-                      }}
-                      spellCheck={false}
-                      style={{
-                        position: 'absolute', inset: 0, width: '100%', height: '100%',
-                        background: 'transparent', border: 'none', color: '#c0d8f0',
-                        caretColor: editVimMode && !editInsertMode ? 'transparent' : '#00d4ff',
-                        outline: 'none', resize: 'none',
-                        ...EDITOR_TEXT_STYLE,
-                      }}
-                    />
-                  </div>
+                <div style={{ height: '100%', minHeight: 400, border: '1px solid rgba(0,212,255,0.15)', borderRadius: 4, overflow: 'hidden' }}>
+                  <VimEditor
+                    value={editContent}
+                    onChange={v => { setEditContent(v); setEditResult(null) }}
+                    vimEnabled={editVimMode}
+                    showLineNumbers={showLineNumbers}
+                    language={viewFormat === 'json' ? 'json' : 'yaml'}
+                    editorRef={editViewRef}
+                    onSave={onVimSave}
+                    onSaveClose={onVimSaveClose}
+                    onQuit={onVimQuit}
+                    onRequestHelp={() => setVimHelp(true)}
+                    onModeChange={setVimMode}
+                  />
                 </div>
               )}
 
@@ -1329,7 +1065,7 @@ export function ActionModal() {
         </div>
 
         {/* ── Inline search bar (describe/yaml/edit-vim) ────────────── */}
-        {searchActive && type !== 'logs' && (!editMode || editVimMode) && (
+        {searchActive && type !== 'logs' && !editMode && (
           <div style={{
             display: 'flex', alignItems: 'center', gap: 8, padding: '6px 16px', flexShrink: 0,
             borderTop: `1px solid rgba(255,204,68,0.2)`, background: 'rgba(255,204,68,0.04)',
@@ -1356,31 +1092,6 @@ export function ActionModal() {
               <span style={{ fontSize: 10, color: '#ff6677' }}>no matches</span>
             )}
             <span style={{ fontSize: 9, color: '#4a6a6a' }}>n/N · navigate · Esc · close</span>
-          </div>
-        )}
-
-        {/* ── Vim command line (:w / :wq / :q) ──────────────────────── */}
-        {cmdActive && editMode && (
-          <div style={{
-            display: 'flex', alignItems: 'center', gap: 8, padding: '6px 16px', flexShrink: 0,
-            borderTop: `1px solid rgba(0,212,255,0.2)`, background: 'rgba(0,212,255,0.04)',
-          }}>
-            <span style={{ fontSize: 11, color: '#00d4ff' }}>:</span>
-            <input
-              ref={cmdRef}
-              value={cmd}
-              onChange={e => setCmd(e.target.value)}
-              onKeyDown={e => {
-                if (e.key === 'Enter')  { e.preventDefault(); runCmd() }
-                if (e.key === 'Escape') { e.preventDefault(); setCmdActive(false); setCmd(''); editRef.current?.focus() }
-              }}
-              placeholder="w · wq · q · q!"
-              style={{
-                flex: 1, background: 'transparent', border: 'none', outline: 'none',
-                color: '#c0d8f0', fontSize: 11, fontFamily: 'inherit',
-              }}
-            />
-            <span style={{ fontSize: 9, color: '#4a6a6a' }}>Enter · run · Esc · cancel</span>
           </div>
         )}
 
@@ -1428,23 +1139,17 @@ export function ActionModal() {
                 {editResult.ok ? `✓ ${editResult.output || 'Applied'}` : `✗ ${editResult.error}`}
               </span>
             )}
-            {/* Vim hints */}
+            {/* Key hints — edit-mode vim keys live in the ? overlay (CodeMirror owns them) */}
             <span style={{ display: 'flex', alignItems: 'center', gap: 8, marginLeft: 4 }}>
               {!editMode && <VimHint k="j/k" label="scroll" />}
-              {editNormal && <VimHint k="hjkl" label="move" />}
-              {(!editMode || editVimMode) && <VimHint k="gg/G" label="top/bottom" />}
-              {isInspect && !editMode && <VimHint k="⇥" label="describe/yaml/json" />}
-              {type === 'helm-values' && <VimHint k="⇥" label="user/all" />}
+              {!editMode && <VimHint k="gg/G" label="top/bottom" />}
+              {isInspect && !editMode && <VimHint k="Tab" label="describe/yaml/json" />}
+              {type === 'helm-values' && <VimHint k="Tab" label="user/all" />}
               {isInspect && !editMode && <VimHint k="e" label="edit" />}
-              {editNormal && <VimHint k="i" label="insert" />}
-              {editNormal && <VimHint k="v" label="visual" />}
-              {editNormal && <VimHint k="dd/yy/p" label="cut/yank/put" />}
-              {editNormal && <VimHint k=":" label="w·wq·q" />}
-              {editInsert && <VimHint k="Esc" label="normal" />}
-              {vimVisual !== null && <VimHint k="y/d/x" label="yank/del" />}
-              {(!editMode || editNormal) && <VimHint k="/" label="search" />}
-              {(!editMode || editNormal) && <VimHint k="n/N" label="next/prev" />}
-              {isSecret && isInspect && (!editMode || editNormal) && <VimHint k="x" label="decode" />}
+              {!editMode && <VimHint k="/" label="search" />}
+              {!editMode && <VimHint k="n/N" label="next/prev" />}
+              {isSecret && isInspect && !editMode && <VimHint k="x" label="decode" />}
+              {editMode && editVimMode && <VimHint k="?" label="vim keys" />}
             </span>
           </div>
 
@@ -1483,7 +1188,7 @@ export function ActionModal() {
                   <span style={{ fontSize: 10, color: '#3a5060' }}>most pod fields are immutable</span>
                 )}
                 <button
-                  onClick={() => { setEditVimMode(v => !v); setEditInsertMode(false); editRef.current?.blur() }}
+                  onClick={() => { setEditVimMode(v => !v); setVimMode('normal') }}
                   style={{
                     fontSize: 10, padding: '2px 8px', borderRadius: 3, cursor: 'pointer',
                     color: editVimMode ? '#ffcc00' : '#3a5a7a',
@@ -1493,7 +1198,7 @@ export function ActionModal() {
                   }}
                 >VIM</button>
                 {editVimMode && (() => {
-                  const mode = editInsertMode ? 'INSERT' : vimVisual !== null ? 'VISUAL' : 'NORMAL'
+                  const mode = editInsert ? 'INSERT' : editVisual ? 'VISUAL' : 'NORMAL'
                   const col  = mode === 'INSERT' ? '#00ffaa' : mode === 'VISUAL' ? '#ff8844' : '#ffcc00'
                   return (
                     <span style={{
@@ -1517,6 +1222,8 @@ export function ActionModal() {
           </div>
         </div>
       </div>
+
+      {vimHelp && <VimHelpOverlay onClose={() => setVimHelp(false)} />}
     </div>
   )
 }

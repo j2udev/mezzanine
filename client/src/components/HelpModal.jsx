@@ -1,4 +1,4 @@
-import { useEffect } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useStore } from '../store'
 
 const SECTIONS = [
@@ -23,6 +23,7 @@ const SECTIONS = [
       ['Shift+S', 'Sort by status'],
       ['(repeat)', 'Toggle sort direction'],
       ['ctrl+z', 'Toggle faults-only'],
+      ['ctrl+g', 'Toggle namespace grouping'],
       ['/', 'Filter by name / namespace'],
       [':', 'Command (:pods, :ns …)'],
     ],
@@ -65,8 +66,8 @@ const SECTIONS = [
       ['Tab', 'Describe / YAML / JSON'],
       ['/', 'Search'],
       ['n / N', 'Next / prev match'],
-      ['e', 'Edit mode'],
-      ['i', 'Insert mode (in edit)'],
+      ['e', 'Edit mode (full vim)'],
+      ['?', 'Vim keys (in edit mode)'],
       ['x', 'Decode secret (yaml / json)'],
       ['#', 'Toggle line numbers'],
       ['c', 'Copy'],
@@ -85,19 +86,61 @@ function Kbd({ children }) {
   )
 }
 
+// Flattened (section-tagged) shortcut list, so the modal can filter/navigate across
+// every section while still rendering them grouped.
+const FLAT = SECTIONS.flatMap(s => s.keys.map(([k, label]) => ({ section: s.title, color: s.color, k, label })))
+
 export function HelpModal() {
   const helpOpen    = useStore(s => s.helpOpen)
   const setHelpOpen = useStore(s => s.setHelpOpen)
 
-  // Esc / ? handled in useKeys; this guards clicks and direct mounts.
+  const [filter, setFilter]               = useState('')
+  const [idx, setIdx]                     = useState(0)
+  const [searchFocused, setSearchFocused] = useState(false)
+  const inputRef    = useRef()
+  const selectedRef = useRef()
+
+  const matches = useMemo(() => {
+    if (!filter) return FLAT
+    const q = filter.toLowerCase()
+    return FLAT.filter(e => e.k.toLowerCase().includes(q) || e.label.toLowerCase().includes(q))
+  }, [filter])
+
+  // Re-group the (possibly filtered) matches back into sections for display, preserving
+  // section + within-section order so a running counter lines up with the nav index.
+  const grouped = useMemo(() => {
+    const map = new Map()
+    matches.forEach(e => {
+      if (!map.has(e.section)) map.set(e.section, { color: e.color, items: [] })
+      map.get(e.section).items.push(e)
+    })
+    return [...map.entries()]
+  }, [matches])
+
+  // Open in keyboard-nav mode (search not focused): j/k scrolls, `/` focuses the filter.
+  useEffect(() => { if (helpOpen) { setFilter(''); setIdx(0); setSearchFocused(false) } }, [helpOpen])
+  useEffect(() => { setIdx(0) }, [filter])
+  useEffect(() => { selectedRef.current?.scrollIntoView({ block: 'nearest' }) }, [idx])
+
   useEffect(() => {
     if (!helpOpen) return
-    const onKey = e => { if (e.key === 'Escape' || e.key === '?') { e.preventDefault(); setHelpOpen(false) } }
+    const onKey = e => {
+      // While the filter input is focused, let it own typing; only Esc (back to nav) is grabbed.
+      if (searchFocused) {
+        if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); inputRef.current?.blur() }
+        return
+      }
+      if (e.key === 'Escape' || e.key === '?')    { e.preventDefault(); e.stopPropagation(); setHelpOpen(false); return }
+      if (e.key === '/')                          { e.preventDefault(); e.stopPropagation(); inputRef.current?.focus(); return }
+      if (e.key === 'j' || e.key === 'ArrowDown') { e.preventDefault(); e.stopPropagation(); setIdx(i => Math.min(i + 1, matches.length - 1)); return }
+      if (e.key === 'k' || e.key === 'ArrowUp')   { e.preventDefault(); e.stopPropagation(); setIdx(i => Math.max(i - 1, 0)); return }
+    }
     window.addEventListener('keydown', onKey, true)
     return () => window.removeEventListener('keydown', onKey, true)
-  }, [helpOpen, setHelpOpen])
+  }, [helpOpen, setHelpOpen, searchFocused, matches.length])
 
   if (!helpOpen) return null
+  let flatIdx = -1
 
   return (
     <div
@@ -118,21 +161,37 @@ export function HelpModal() {
       >
         {/* Header */}
         <div style={{
-          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
           padding: '12px 18px', borderBottom: '1px solid rgba(0,212,255,0.18)',
-          position: 'sticky', top: 0, background: 'rgba(2,10,22,0.98)',
+          position: 'sticky', top: 0, background: 'rgba(2,10,22,0.98)', zIndex: 1,
         }}>
-          <span style={{ fontSize: 12, fontWeight: 'bold', letterSpacing: '0.16em', color: '#00d4ff' }}>
-            KEYBOARD SHORTCUTS
-          </span>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-            <span style={{ fontSize: 10, color: '#1e3a52' }}>? · ESC · close</span>
-            <button onClick={() => setHelpOpen(false)}
-              style={{ fontSize: 18, lineHeight: 1, color: '#3a5a7a', background: 'none', border: 'none', cursor: 'pointer', padding: '0 2px' }}
-              onMouseEnter={e => e.target.style.color = '#c0d8f0'}
-              onMouseLeave={e => e.target.style.color = '#3a5a7a'}
-            >×</button>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
+            <span style={{ fontSize: 12, fontWeight: 'bold', letterSpacing: '0.16em', color: '#00d4ff' }}>
+              KEYBOARD SHORTCUTS
+            </span>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+              <span style={{ fontSize: 10, color: '#1e3a52' }}>j/k · / filter · esc close</span>
+              <button onClick={() => setHelpOpen(false)}
+                style={{ fontSize: 18, lineHeight: 1, color: '#3a5a7a', background: 'none', border: 'none', cursor: 'pointer', padding: '0 2px' }}
+                onMouseEnter={e => e.target.style.color = '#c0d8f0'}
+                onMouseLeave={e => e.target.style.color = '#3a5a7a'}
+              >×</button>
+            </div>
           </div>
+          <input
+            ref={inputRef}
+            value={filter}
+            onChange={e => setFilter(e.target.value)}
+            onFocus={() => setSearchFocused(true)}
+            onBlur={() => setSearchFocused(false)}
+            placeholder={searchFocused ? 'filter shortcuts…' : 'press / to filter'}
+            style={{
+              width: '100%',
+              background: searchFocused ? 'rgba(0,212,255,0.1)' : 'rgba(0,212,255,0.04)',
+              border: `1px solid ${searchFocused ? 'rgba(0,212,255,0.4)' : 'rgba(0,212,255,0.12)'}`,
+              color: '#c0e8ff', fontSize: 12, padding: '4px 8px', borderRadius: 4,
+              fontFamily: 'inherit', outline: 'none',
+            }}
+          />
         </div>
 
         {/* Sections grid */}
@@ -140,28 +199,41 @@ export function HelpModal() {
           display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(330px, 1fr))',
           gap: '8px 28px', padding: '16px 22px',
         }}>
-          {SECTIONS.map(section => (
-            <div key={section.title}>
+          {grouped.length === 0 && (
+            <div style={{ padding: '6px 0', fontSize: 11, color: '#3a5a7a', fontStyle: 'italic' }}>
+              No shortcuts match "{filter}".
+            </div>
+          )}
+          {grouped.map(([title, { color, items }]) => (
+            <div key={title}>
               <div style={{
                 fontSize: 10, fontWeight: 'bold', letterSpacing: '0.12em',
-                color: section.color, marginBottom: 8, marginTop: 6,
-              }}>{section.title}</div>
-              {section.keys.map(([k, label]) => (
-                <div key={k + label} style={{
-                  display: 'flex', alignItems: 'center', gap: 10,
-                  padding: '3px 0', fontSize: 11,
-                }}>
-                  <span style={{ flexShrink: 0, minWidth: 96 }}>
-                    {k.split(' / ').map((part, i, arr) => (
-                      <span key={part}>
-                        <Kbd>{part}</Kbd>
-                        {i < arr.length - 1 && <span style={{ color: '#3a5a7a', margin: '0 2px' }}>/</span>}
-                      </span>
-                    ))}
-                  </span>
-                  <span style={{ color: '#7a9ab8' }}>{label}</span>
-                </div>
-              ))}
+                color, marginBottom: 8, marginTop: 6,
+              }}>{title}</div>
+              {items.map(({ k, label }) => {
+                flatIdx += 1
+                const selected = flatIdx === idx
+                return (
+                  <div key={k + label}
+                    ref={selected ? selectedRef : null}
+                    style={{
+                      display: 'flex', alignItems: 'center', gap: 10,
+                      padding: '3px 6px', margin: '0 -6px', fontSize: 11, borderRadius: 4,
+                      background: selected ? `${color}1f` : 'transparent',
+                      borderLeft: `2px solid ${selected ? color : 'transparent'}`,
+                    }}>
+                    <span style={{ flexShrink: 0, minWidth: 96 }}>
+                      {k.split(' / ').map((part, i, arr) => (
+                        <span key={part}>
+                          <Kbd>{part}</Kbd>
+                          {i < arr.length - 1 && <span style={{ color: '#3a5a7a', margin: '0 2px' }}>/</span>}
+                        </span>
+                      ))}
+                    </span>
+                    <span style={{ color: selected ? '#c0d8f0' : '#7a9ab8' }}>{label}</span>
+                  </div>
+                )
+              })}
             </div>
           ))}
         </div>

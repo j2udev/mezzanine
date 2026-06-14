@@ -6,6 +6,10 @@ import { PortForwardModal } from './PortForwardModal'
 import { HelpModal } from './HelpModal'
 import { ActionMenu } from './ActionMenu'
 
+// Resource names the `:` command bar can autocomplete/cycle through (Tab). The canonical
+// resource names (deduped alias targets) plus the `ns` namespace-picker shortcut.
+const COMMAND_OPTIONS = [...new Set([...Object.values(RESOURCE_ALIASES), 'ns', 'namespace'])].sort()
+
 function Kbd({ children }) {
   return (
     <span style={{
@@ -48,6 +52,8 @@ export function HUD({ panelWidth = 288 }) {
   const faultsOnly      = useStore(s => s.faultsOnly)
   const toggleFaults    = useStore(s => s.toggleFaults)
   const clearSort       = useStore(s => s.clearSort)
+  const groupByNamespace        = useStore(s => s.groupByNamespace)
+  const toggleGroupByNamespace  = useStore(s => s.toggleGroupByNamespace)
 
   const setActiveNamespace  = useStore(s => s.setActiveNamespace)
   const setFilter           = useStore(s => s.setFilter)
@@ -61,6 +67,10 @@ export function HUD({ panelWidth = 288 }) {
 
   const filterRef  = useRef()
   const commandRef = useRef()
+  // Command (:) Tab-autocomplete: stem = what the user typed before the first Tab, idx = where
+  // we are in the candidate cycle. Reset on every keystroke so typing restarts the cycle.
+  const acStemRef  = useRef(null)
+  const acIdxRef   = useRef(-1)
 
   useEffect(() => { if (filterActive)  filterRef.current?.focus()  }, [filterActive])
   useEffect(() => { if (commandActive) commandRef.current?.focus() }, [commandActive])
@@ -93,7 +103,28 @@ export function HUD({ panelWidth = 288 }) {
     ? 'namespace picker'
     : RESOURCE_ALIASES[cmdLow]
 
+  // Tab in the command (:) bar completes/cycles through resource names. The stem (typed text
+  // before the first Tab) is held in acStemRef so repeated Tabs cycle off the original input,
+  // not the now-complete name. Shift+Tab cycles backwards.
+  const cycleCommand = (dir) => {
+    if (acStemRef.current == null) { acStemRef.current = command; acIdxRef.current = -1 }
+    const stem = acStemRef.current.trim().toLowerCase()
+    const cands = COMMAND_OPTIONS
+      .filter(n => n.includes(stem))
+      .sort((a, b) => {
+        const as = a.startsWith(stem), bs = b.startsWith(stem)
+        if (as !== bs) return as ? -1 : 1
+        return a.localeCompare(b)
+      })
+    if (!cands.length) return
+    acIdxRef.current = (acIdxRef.current + dir + cands.length) % cands.length
+    setCommand(cands[acIdxRef.current])
+  }
+
   const showBreadcrumb = navStack.length > 0 || !!drilldownLabel
+
+  // The grouping toggle only matters for namespaced resources viewed across all namespaces.
+  const namespacedView = activeNamespace === 'all' && !nsPickerMode && allItems.some(i => i.namespace)
 
   return (
     <>
@@ -190,7 +221,52 @@ export function HUD({ panelWidth = 288 }) {
           </div>
         )}
 
+        {/* Current resource indicator — front-and-center "what am I looking at" */}
+        {!showBreadcrumb && (
+          <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, flexShrink: 0, minWidth: 0 }}>
+            <span style={{
+              fontSize: 15, fontWeight: 600, color: '#c0e8ff', letterSpacing: '0.02em',
+              textTransform: 'capitalize', whiteSpace: 'nowrap',
+            }}>
+              {resourceLabel}
+            </span>
+            <span style={{ fontSize: 11, color: '#4a7a9a', whiteSpace: 'nowrap' }}>
+              {filter ? `${filteredCount}/${totalCount}` : totalCount}
+            </span>
+            {filter && (
+              <span style={{
+                fontSize: 11, color: '#00d4ff', fontFamily: 'inherit', whiteSpace: 'nowrap',
+                background: 'rgba(0,212,255,0.1)', border: '1px solid rgba(0,212,255,0.25)',
+                borderRadius: 4, padding: '1px 6px',
+              }}>
+                /{filter}
+              </span>
+            )}
+          </div>
+        )}
+
         <div style={{ flex: 1 }} />
+
+        {/* Namespace grouping toggle (flat list ⇄ grouped headers) */}
+        {namespacedView && (
+          <button
+            onClick={toggleGroupByNamespace}
+            title="Toggle namespace grouping (ctrl+g)"
+            style={{
+              display: 'flex', alignItems: 'center', gap: 5, flexShrink: 0, cursor: 'pointer',
+              padding: '2px 8px', borderRadius: 4, fontSize: 10, letterSpacing: '0.04em',
+              fontFamily: 'inherit',
+              color: groupByNamespace ? '#00d4ff' : '#4a7a9a',
+              background: groupByNamespace ? 'rgba(0,212,255,0.1)' : 'rgba(255,255,255,0.04)',
+              border: `1px solid ${groupByNamespace ? 'rgba(0,212,255,0.3)' : 'rgba(255,255,255,0.1)'}`,
+            }}
+            onMouseEnter={e => { if (!groupByNamespace) e.currentTarget.style.color = '#7ab0cc' }}
+            onMouseLeave={e => { if (!groupByNamespace) e.currentTarget.style.color = '#4a7a9a' }}
+          >
+            <span style={{ fontSize: 12, lineHeight: 1 }}>{groupByNamespace ? '⊟' : '≡'}</span>
+            {groupByNamespace ? 'grouped' : 'flat'}
+          </button>
+        )}
       </div>
 
       {/* ── Detail panel ─────────────────────────────────────────── */}
@@ -223,9 +299,10 @@ export function HUD({ panelWidth = 288 }) {
             <input
               ref={commandRef}
               value={command}
-              onChange={e => setCommand(e.target.value)}
+              onChange={e => { acStemRef.current = null; setCommand(e.target.value) }}
               onBlur={() => { if (!command) setCommandActive(false) }}
               onKeyDown={e => {
+                if (e.key === 'Tab') { e.preventDefault(); cycleCommand(e.shiftKey ? -1 : 1); return }
                 if (e.key === 'Enter') submitCommand()
                 if (e.key === 'Escape') setCommandActive(false)
               }}
@@ -239,6 +316,7 @@ export function HUD({ panelWidth = 288 }) {
             {commandPreview && (
               <span style={{ fontSize: 10, color: '#00d4ff66' }}>→ {commandPreview}</span>
             )}
+            <span style={{ fontSize: 10, color: '#3a5a7a' }}>⇥ cycle</span>
           </div>
         ) : filterActive ? (
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, flex: 1 }}>
