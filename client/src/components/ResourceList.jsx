@@ -37,6 +37,7 @@ const COL_HEADERS = {
   crds:                ['GROUP', 'VERSION', 'SCOPE', 'AGE'],
   helmreleases:        ['CHART', 'VERSION', 'STATUS', 'AGE'],
   containers:          ['STATUS', 'POD'],
+  portforwards:        ['RESOURCE', 'LOCAL', 'REMOTE', 'STATUS', 'ERROR'],
   __cr__:              ['STATUS', 'AGE'],
 }
 const COL_WIDTHS = {
@@ -69,6 +70,7 @@ const COL_WIDTHS = {
   crds:                [180, 80, 80, 55],
   helmreleases:        [200, 80, 88, 55],
   containers:          [88, 200],
+  portforwards:        [100, 130, 70, 80, 160],
   __cr__:              [88, 55],
 }
 

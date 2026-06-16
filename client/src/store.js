@@ -34,6 +34,7 @@ export const RESOURCE_ALIASES = {
   ev: 'events', event: 'events', events: 'events',
   crd: 'crds', crds: 'crds',
   helm: 'helmreleases', helmreleases: 'helmreleases',
+  pf: 'portforwards', portforward: 'portforwards', portforwards: 'portforwards', forwards: 'portforwards',
 }
 
 // Resource types that support Enter drill-down
@@ -140,6 +141,7 @@ export const useStore = create((set, get) => ({
   crds: [],
   crdResources: {},
   helmreleases: [],
+  portforwards: [],       // active kubectl port-forwards (k9s-style table, #53)
   selectedIds: new Set(), // multi-select
   demoMode: false,
   connected: false,          // WebSocket transport connection
@@ -440,10 +442,31 @@ export const useStore = create((set, get) => ({
   setDeleteConfirm: (data) => set({ deleteConfirm: data }),
   cancelDelete: () => set({ deleteConfirm: null }),
 
+  // Stop the selected port-forward(s) and drop them from the table (#53). Used for both
+  // ctrl+d and ctrl+k on the portforwards view — stopping a forward is non-destructive
+  // (no cluster state changes, trivially re-created), so it needs no confirm dialog. Works
+  // in demo mode too (the backend tracks simulated forwards the same way).
+  stopSelectedForwards: () => {
+    const s = get()
+    const all = s.getFilteredItems()
+    let targets = []
+    if (s.selectedIds.size > 0)  targets = all.filter(i => s.selectedIds.has(i.id))
+    else if (s.selectedId)       { const it = all.find(i => i.id === s.selectedId); if (it) targets = [it] }
+    if (!targets.length) return
+    const ids = new Set(targets.map(t => t.id))
+    targets.forEach(t => fetch(`/api/port-forward/${t.id}`, { method: 'DELETE' }).catch(() => {}))
+    set(st => ({
+      portforwards: st.portforwards.filter(p => !ids.has(p.id)),  // optimistic removal
+      selectedIds: new Set(),
+      selectedId: ids.has(st.selectedId) ? null : st.selectedId,
+    }))
+  },
+
   // Delete with confirmation (ctrl+d / menu). Multi-select aware: confirms all marked
   // items, else the single selected item.
   requestDelete: () => {
     const s = get()
+    if (s.activeResource === 'portforwards') return s.stopSelectedForwards()
     if (s.selectedIds.size > 0) {
       const items = s.getFilteredItems().filter(i => s.selectedIds.has(i.id))
       if (items.length) set({ deleteConfirm: { items, resource: s.activeResource } })
@@ -456,6 +479,7 @@ export const useStore = create((set, get) => ({
   // Instant kill, no confirmation (ctrl+k / menu). Multi-select aware. No-op in demo mode.
   killSelected: () => {
     const s = get()
+    if (s.activeResource === 'portforwards') return s.stopSelectedForwards()
     if (s.demoMode) return
     const kill = (item) => {
       const ns = CLUSTER_SCOPED_RESOURCES.has(s.activeResource) ? '_' : (item.namespace || '_')

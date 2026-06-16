@@ -351,11 +351,22 @@ still #14.
 (Shift+T / `:theme`) with j/k live-preview + localStorage persistence. See the **Theming**
 section above. This is now the home for #71's deeper contrast/light-mode work too.
 
+**Session 18:** #53 — port-forward tracking table. A dedicated k9s-style **Port Forwards**
+view (`:pf`, under NETWORK in the sidebar) lists every active forward as a normal resource
+list (RESOURCE/LOCAL/REMOTE/STATUS/ERROR columns, live count). Server folds active forwards
+into the standard data stream (`latest.portforwards`, injected in `refresh()`/`/api/data`/WS
+init via `pfList()`; `pfPublic` normalizes the `_` cluster-scoped namespace to ''), so the
+table auto-refreshes like everything else. Stopping is non-destructive so ctrl+d/ctrl+k and
+the `a`-palette "Stop forward" all run `stopSelectedForwards()` (DELETE `/api/port-forward/:id`
++ optimistic removal, multi-select aware) with no confirm dialog — `isStd` in actions.js now
+excludes `portforwards` so it gets no kubectl describe/yaml/edit/delete. In the Shift+F modal,
+Tab off the last port chip wraps to the LOCAL input (and Shift+Tab from LOCAL back to it).
+
 **Remaining:**
 - #15 In-cluster deploy
 - #16 Multi-cluster support
 - #17 Single binary packaging
-- #46 Faster auto-refresh · #53 port-forward tracking table
+- #46 Faster auto-refresh
 - #62 syntax highlighting in read views (editor done)
 - #14/#71 follow-ups: a light theme + a custom/user-defined color editor are now one
   `THEMES` entry away (deeper contrast tuning lives here)

@@ -46,6 +46,7 @@ let latest = {
   pvcs: [], pvs: [], storageclasses: [],
   roles: [], clusterroles: [], rolebindings: [], clusterrolebindings: [],
   nodes: [], namespaces: [], events: [], crds: [], helmreleases: [],
+  portforwards: [],
   demoMode: false, clusterConnected: false, clusterError: null,
 }
 
@@ -59,6 +60,7 @@ async function refresh() {
       new Promise((_, reject) => setTimeout(() => reject(new Error('fetch timeout after 15s')), 15000)),
     ])
     latest = data
+    latest.portforwards = pfList()   // surface live forwards in the data stream (#53)
     const msg = JSON.stringify({ type: 'update', data: latest })
     for (const ws of clients) {
       if (ws.readyState === 1) ws.send(msg)
@@ -72,13 +74,13 @@ async function refresh() {
 
 wss.on('connection', (ws) => {
   clients.add(ws)
-  ws.send(JSON.stringify({ type: 'update', data: latest }))
+  ws.send(JSON.stringify({ type: 'update', data: { ...latest, portforwards: pfList() } }))
   ws.on('close', () => clients.delete(ws))
   ws.on('error', () => clients.delete(ws))
 })
 
 app.get('/api/health', (_, res) => res.json({ ok: true, demoMode: latest.demoMode }))
-app.get('/api/data', (_, res) => res.json(latest))
+app.get('/api/data', (_, res) => res.json({ ...latest, portforwards: pfList() }))
 app.get('/api/logs/:namespace/:pod', async (req, res) => {
   const { namespace, pod } = req.params
   const { container, tail, sinceSeconds } = req.query
@@ -377,10 +379,12 @@ app.post('/api/helm/rollback/:namespace/:name/:revision', async (req, res) => {
 // Tracks `kubectl port-forward` child processes started from the UI.
 const portForwards = new Map() // id → { id, resource, namespace, name, localPort, remotePort, status, error, proc }
 let pfSeq = 0
-const pfPublic = ({ proc, ...rest }) => rest
+// Strip the child handle and normalize cluster-scoped namespaces ('_' → '') for the UI.
+const pfPublic = ({ proc, namespace, ...rest }) => ({ ...rest, namespace: namespace === '_' ? '' : namespace })
+const pfList = () => [...portForwards.values()].map(pfPublic)
 
 app.get('/api/port-forward', (_, res) => {
-  res.json({ forwards: [...portForwards.values()].map(pfPublic) })
+  res.json({ forwards: pfList() })
 })
 
 app.post('/api/port-forward/:resource/:namespace/:name', (req, res) => {

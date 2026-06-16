@@ -193,6 +193,14 @@ function rowFields(item, resource) {
         { value: item.status, color: statusColor(item.status), w: 88 },
         { value: item.pod,    color: 'var(--mz-accent-2)', w: 200, mono: true },
       ]
+    case 'portforwards':
+      return [
+        { value: item.resource.replace(/s$/, ''),  color: 'var(--mz-alt)', w: 100 },
+        { value: `127.0.0.1:${item.localPort}`,     color: 'var(--mz-accent)', w: 130, mono: true },
+        { value: `→ ${item.remotePort}`,            color: 'var(--mz-accent-2)', w: 70, mono: true },
+        { value: item.status,                       color: statusColor(item.status), w: 80 },
+        { value: item.error || '',                  color: 'var(--mz-danger-2)', w: 160 },
+      ]
     default:
       return item.status ? [
         { value: item.status, color: statusColor(item.status), w: 88 },

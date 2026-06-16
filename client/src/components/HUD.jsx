@@ -1,6 +1,6 @@
 import { useRef, useEffect, useMemo } from 'react'
 import { alpha } from '../theme'
-import { useStore, RESOURCE_ALIASES, DRILLABLE, FORWARDABLE, OWNED } from '../store'
+import { useStore, RESOURCE_ALIASES } from '../store'
 import { DetailPanel } from './DetailPanel'
 import { ActionModal } from './ActionModal'
 import { PortForwardModal } from './PortForwardModal'
@@ -193,6 +193,14 @@ export function HUD({ panelWidth = 288 }) {
           </span>
         )}
 
+        {/* Center slot — breadcrumb OR resource indicator, absolutely centered in the
+            header (#73) so it reads as "what am I looking at" instead of being pinned
+            next to the wordmark. */}
+        <div style={{
+          position: 'absolute', left: '50%', top: 0, height: 44, transform: 'translateX(-50%)',
+          display: 'flex', alignItems: 'center', maxWidth: '40%', pointerEvents: 'none',
+        }}>
+        <div style={{ display: 'flex', alignItems: 'center', minWidth: 0, pointerEvents: 'auto' }}>
         {/* Breadcrumb trail */}
         {showBreadcrumb && (
           <div style={{
@@ -253,6 +261,8 @@ export function HUD({ panelWidth = 288 }) {
             </span>
           </div>
         )}
+        </div>
+        </div>
 
         <div style={{ flex: 1 }} />
 
@@ -409,36 +419,12 @@ export function HUD({ panelWidth = 288 }) {
       >
         {(
           <div style={{ display: 'flex', alignItems: 'center', gap: 12, flex: 1, flexWrap: 'wrap' }}>
-            <Hint keys={['?']} label="help" />
+            {/* Bare-minimum shortcut hints (#72) — everything else lives in the ? help modal */}
+            <Hint keys={['j', 'k']} label="select" />
             <Hint keys={[':']} label="resource" />
             <Hint keys={['/']} label="filter" />
-            <Hint keys={['j', 'k']} label="select" />
-            {selectedId && DRILLABLE.has(activeResource) && <Hint keys={['↵']} label="enter" />}
-            {navStack.length > 0 && <Hint keys={['[']} label="back" />}
-            {navFuture.length > 0 && <Hint keys={[']']} label="fwd" />}
-            {selectedId && activeResource === 'helmreleases' && <>
-              <span style={{ color: 'var(--mz-text-faint)', fontSize: 10 }}>·</span>
-              <Hint keys={['v']} label="values" />
-              <Hint keys={['m']} label="manifest" />
-              <Hint keys={['n']} label="notes" />
-              <Hint keys={['h']} label="history" />
-              <Hint keys={['d']} label="describe" />
-              <Hint keys={['a']} label="actions" />
-            </>}
-            {selectedId && activeResource !== 'helmreleases' && <>
-              <span style={{ color: 'var(--mz-text-faint)', fontSize: 10 }}>·</span>
-              <Hint keys={['spc']} label="mark" />
-              <Hint keys={['l']} label="logs" />
-              <Hint keys={['d']} label="describe" />
-              <Hint keys={['y']} label="yaml" />
-              <Hint keys={['e']} label="edit" />
-              {activeResource === 'secrets' && <Hint keys={['x']} label="decode" />}
-              {FORWARDABLE.has(activeResource) && <Hint keys={['⇧f']} label="fwd" />}
-              {OWNED.has(activeResource) && <Hint keys={['⇧j']} label="owner" />}
-              <Hint keys={['a']} label="actions" />
-              <Hint keys={['ctrl+d']} label="confirm del" />
-              <Hint keys={['ctrl+k']} label="kill" />
-            </>}
+            <Hint keys={['?']} label="help" />
+            {/* State pills (not shortcut spam) stay so the user can see/clear active modes */}
             {selectedIds?.size > 0 && (
               <span style={{ fontSize: 10, color: 'var(--mz-warn-2)', background: 'rgba(var(--mz-warn-2-rgb),0.1)', border: '1px solid rgba(var(--mz-warn-2-rgb),0.3)', borderRadius: 3, padding: '1px 6px' }}>
                 {selectedIds.size} marked
@@ -462,7 +448,6 @@ export function HUD({ panelWidth = 288 }) {
                 faults only <span style={{ opacity: 0.6 }}>×</span>
               </span>
             )}
-            <Hint keys={['Esc']} label="back" />
           </div>
         )}
 

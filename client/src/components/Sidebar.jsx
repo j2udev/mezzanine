@@ -27,6 +27,7 @@ const GROUPS = [
       { key: 'services',        label: 'Services'         },
       { key: 'ingresses',       label: 'Ingresses'        },
       { key: 'networkpolicies', label: 'Network Policies' },
+      { key: 'portforwards',    label: 'Port Forwards'    },
     ],
   },
   {
@@ -143,6 +144,7 @@ export function Sidebar() {
     services:            useStore(s => s.services.length),
     ingresses:           useStore(s => s.ingresses.length),
     networkpolicies:     useStore(s => s.networkpolicies.length),
+    portforwards:        useStore(s => s.portforwards.length),
     configmaps:          useStore(s => s.configmaps.length),
     secrets:             useStore(s => s.secrets.length),
     serviceaccounts:     useStore(s => s.serviceaccounts.length),

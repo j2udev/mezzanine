@@ -26,6 +26,8 @@ export function PortForwardModal() {
   const [busy,      setBusy]      = useState(false)
   const [error,     setError]     = useState(null)
   const remoteRef = useRef()
+  const localRef  = useRef()
+  const lastChipRef = useRef()
 
   const refresh = useCallback(async () => {
     try {
@@ -43,7 +45,7 @@ export function PortForwardModal() {
     const rp = portSuggestions(pfModal.resource, pfModal.item)[0] || ''
     setRemote(rp); setLocal(rp); setError(null)
     refresh()
-    setTimeout(() => remoteRef.current?.focus(), 30)
+    setTimeout(() => localRef.current?.focus(), 30)
   }, [pfModal, refresh])
 
   const start = useCallback(async () => {
@@ -116,7 +118,8 @@ export function PortForwardModal() {
 
         {/* New forward form */}
         <div style={{ padding: '14px 16px', display: 'flex', alignItems: 'flex-end', gap: 12, flexShrink: 0 }}>
-          <PortInput label="LOCAL"  value={local}  onChange={setLocal}  onEnter={start} placeholder={remote || 'auto'} />
+          <PortInput label="LOCAL"  value={local}  onChange={setLocal}  onEnter={start} inputRef={localRef} placeholder={remote || 'auto'}
+            onShiftTab={() => lastChipRef.current?.focus()} />
           <span style={{ color: 'var(--mz-text-dim)', fontSize: 16, paddingBottom: 4 }}>→</span>
           <PortInput label="REMOTE" value={remote} onChange={setRemote} onEnter={start} inputRef={remoteRef} placeholder="port" />
           <button
@@ -135,10 +138,16 @@ export function PortForwardModal() {
         {suggestions.length > 0 && (
           <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '0 16px 12px', flexWrap: 'wrap' }}>
             <span style={{ fontSize: 9, color: 'var(--mz-accent-2)', letterSpacing: '0.08em', textTransform: 'uppercase' }}>ports:</span>
-            {suggestions.map(p => {
+            {suggestions.map((p, i) => {
               const active = remote === p
+              const isLast = i === suggestions.length - 1
               return (
-                <button key={p} onClick={() => { setRemote(p); setLocal(p) }} style={{
+                <button key={p}
+                  ref={isLast ? lastChipRef : undefined}
+                  onClick={() => { setRemote(p); setLocal(p) }}
+                  // Tabbing off the end of the port list wraps back to the LOCAL input (#53).
+                  onKeyDown={e => { if (isLast && e.key === 'Tab' && !e.shiftKey) { e.preventDefault(); localRef.current?.focus() } }}
+                  style={{
                   fontSize: 10, padding: '2px 9px', borderRadius: 3, cursor: 'pointer', fontFamily: 'monospace',
                   color: active ? 'var(--mz-bg)' : ACCENT,
                   background: active ? ACCENT : 'rgba(var(--mz-orange-rgb),0.08)',
@@ -191,7 +200,7 @@ export function PortForwardModal() {
   )
 }
 
-function PortInput({ label, value, onChange, onEnter, placeholder, inputRef }) {
+function PortInput({ label, value, onChange, onEnter, placeholder, inputRef, onShiftTab }) {
   return (
     <label style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
       <span style={{ fontSize: 9, color: 'var(--mz-accent-2)', letterSpacing: '0.08em' }}>{label}</span>
@@ -199,7 +208,10 @@ function PortInput({ label, value, onChange, onEnter, placeholder, inputRef }) {
         ref={inputRef}
         value={value}
         onChange={e => onChange(e.target.value.replace(/[^0-9]/g, ''))}
-        onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); onEnter() } }}
+        onKeyDown={e => {
+          if (e.key === 'Enter') { e.preventDefault(); onEnter() }
+          else if (e.key === 'Tab' && e.shiftKey && onShiftTab) { e.preventDefault(); onShiftTab() }
+        }}
         placeholder={placeholder}
         inputMode="numeric"
         style={{

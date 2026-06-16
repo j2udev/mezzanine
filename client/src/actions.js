@@ -20,7 +20,7 @@ import { FORWARDABLE, OWNED } from './store'
 const LOGS = new Set(['pods', 'deployments', 'statefulsets', 'daemonsets', 'services', 'jobs'])
 // "Standard" workloads/config that support yaml/edit/describe/delete (not helm, container
 // drilldown rows, or raw custom-resource lists).
-const isStd = (r) => r !== 'helmreleases' && r !== 'containers' && !r.startsWith('cr:')
+const isStd = (r) => r !== 'helmreleases' && r !== 'containers' && r !== 'portforwards' && !r.startsWith('cr:')
 
 export const OBJECT_ACTIONS = [
   // ── Inspect ──────────────────────────────────────────────
@@ -59,6 +59,10 @@ export const OBJECT_ACTIONS = [
     when: r => isStd(r), run: s => s.requestDelete() },
   { id: 'kill', label: 'Kill (no confirm)', hint: '⌃k', color: 'var(--mz-danger)', group: 'Danger', danger: true,
     when: r => isStd(r), run: s => s.killSelected() },
+  // Port-forwards table (#53): stopping a forward is non-destructive, so ctrl+d and ctrl+k
+  // both just stop it (no confirm dialog) via stopSelectedForwards().
+  { id: 'stop-forward', label: 'Stop forward', hint: '⌃d', color: 'var(--mz-danger-2)', group: 'Danger', danger: true,
+    when: r => r === 'portforwards', run: s => s.stopSelectedForwards() },
 ]
 
 // Actions applicable to the active resource (optionally excluding danger ones).
