@@ -122,7 +122,6 @@ function SectionLabel({ children, collapsed, onToggle }) {
 export function Sidebar() {
   const activeResource    = useStore(s => s.activeResource)
   const collapsed         = useStore(s => s.sidebarCollapsed)
-  const toggleSidebar     = useStore(s => s.toggleSidebar)
   const setActiveResource = useStore(s => s.setActiveResource)
   const crds              = useStore(s => s.crds)
   const fetchCrdResources = useStore(s => s.fetchCrdResources)
@@ -165,31 +164,15 @@ export function Sidebar() {
   return (
     <div style={{
       position: 'absolute', top: 44, bottom: 36, left: 0,
-      width: collapsed ? 36 : 200,
+      width: collapsed ? 0 : 200,
       background: 'rgba(var(--mz-surface-rgb),0.97)',
-      borderRight: '1px solid rgba(var(--mz-accent-rgb), 0.07)',
+      borderRight: collapsed ? 'none' : '1px solid rgba(var(--mz-accent-rgb), 0.07)',
       display: 'flex', flexDirection: 'column',
       transition: 'width 0.18s ease', overflow: 'hidden',
       zIndex: 5, flexShrink: 0,
     }}>
-      {/* Collapse toggle - top */}
-      <div
-        onClick={toggleSidebar}
-        style={{
-          height: 30, display: 'flex', alignItems: 'center',
-          justifyContent: collapsed ? 'center' : 'flex-end',
-          paddingRight: collapsed ? 0 : 10,
-          cursor: 'pointer', borderBottom: '1px solid rgba(var(--mz-accent-rgb),0.06)',
-          color: 'var(--mz-text-dim)', fontSize: 14, lineHeight: 1,
-          flexShrink: 0, transition: 'color 0.12s', userSelect: 'none',
-        }}
-        onMouseEnter={e => e.currentTarget.style.color = 'var(--mz-accent)'}
-        onMouseLeave={e => e.currentTarget.style.color = 'var(--mz-text-dim)'}
-        title={collapsed ? 'Expand sidebar (ctrl+b)' : 'Collapse sidebar (ctrl+b)'}
-      >
-        {collapsed ? '›' : '‹'}
-      </div>
-
+      {/* No sidebar header: the brand wordmark in the top bar doubles as the collapse
+          toggle (#13). The sidebar content starts straight at the first group. */}
       {!collapsed && (
         <div style={{ overflowY: 'auto', flex: 1, paddingBottom: 4 }}>
           {GROUPS.map(group => {

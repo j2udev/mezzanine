@@ -201,6 +201,9 @@ export const useStore = create((set, get) => ({
 
   // UI
   sidebarCollapsed: false,
+  // Right detail drawer on/off (#todo3). When false the panel never renders, even on
+  // selection, freeing the list real estate. Persisted so it survives reloads.
+  panelEnabled: (() => { try { return localStorage.getItem('mezz-panel') !== 'off' } catch { return true } })(),
   commandActive: false,
   command: '',
   modal: null,
@@ -233,6 +236,11 @@ export const useStore = create((set, get) => ({
   setFilterPinned: (v) => set({ filterPinned: v }),
   clearFilter: () => set({ filter: '', filterActive: false, filterPinned: false }),
   toggleSidebar: () => set(s => ({ sidebarCollapsed: !s.sidebarCollapsed })),
+  togglePanel: () => set(s => {
+    const next = !s.panelEnabled
+    try { localStorage.setItem('mezz-panel', next ? 'on' : 'off') } catch { /* ignore */ }
+    return { panelEnabled: next }
+  }),
 
   // Toggle sort direction when the same column is re-selected, else switch column (asc).
   setSort: (key) => set(s => key === s.sortKey
@@ -284,6 +292,26 @@ export const useStore = create((set, get) => ({
       })
       return true
     }
+
+    // Custom resources (#20): the picker submits a CRD as its `cr:group/version/plural` key
+    // (k8s group/version/plural are lowercase, so the earlier .toLowerCase() is safe). Typing
+    // a CRD's kind / plural / full name as a bare `:` command also resolves here.
+    if (trimmed.startsWith('cr:')) {
+      const [group, version, plural] = trimmed.slice(3).split('/')
+      if (group && version && plural) {
+        set({ command: '', commandActive: false, filterActive: false, filterMode: 'str' })
+        get().fetchCrdResources(group, version, plural)
+        return true
+      }
+    }
+    const crd = (get().crds || []).find(c =>
+      c.kind.toLowerCase() === trimmed || c.plural.toLowerCase() === trimmed || c.name.toLowerCase() === trimmed)
+    if (crd) {
+      set({ command: '', commandActive: false, filterActive: false, filterMode: 'str' })
+      get().fetchCrdResources(crd.group, crd.version, crd.plural)
+      return true
+    }
+
     set({ commandActive: false, command: '' })
     return false
   },

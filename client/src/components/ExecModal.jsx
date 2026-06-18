@@ -7,6 +7,11 @@ import { useStore } from '../store'
 
 const ACCENT = 'var(--mz-accent-2)'
 
+const kbdStyle = {
+  fontFamily: 'monospace', fontSize: 10, padding: '1px 5px', borderRadius: 3,
+  color: ACCENT, background: alpha(ACCENT, 8), border: `1px solid ${alpha(ACCENT, 30)}`,
+}
+
 // Pull a real color string out of a CSS var for xterm (which needs concrete colors, not vars).
 const cssVar = (name, fallback) =>
   getComputedStyle(document.documentElement).getPropertyValue(name).trim() || fallback
@@ -125,6 +130,26 @@ export function ExecModal() {
     }
   }, [execModal, shell, closeExec])
 
+  // Breakout handler: when the shell is NOT live (still probing, never connected, errored,
+  // exited, or no shell found) there is no terminal owning the keys, so Esc / Ctrl-D have
+  // nothing to escape to - let them close the modal. While the shell IS live ('open') we do
+  // nothing here so xterm keeps Esc and Ctrl-D (useKeys.js early-returns on execModal too).
+  // Capture phase so we beat anything else; only acts on the not-connected states.
+  useEffect(() => {
+    if (!execModal) return
+    if (status === 'open') return
+    const onKey = (e) => {
+      const isEsc = e.key === 'Escape'
+      const isCtrlD = (e.ctrlKey || e.metaKey) && (e.key === 'd' || e.key === 'D')
+      if (!isEsc && !isCtrlD) return
+      e.preventDefault()
+      e.stopPropagation()
+      closeExec()
+    }
+    window.addEventListener('keydown', onKey, true)
+    return () => window.removeEventListener('keydown', onKey, true)
+  }, [execModal, status, closeExec])
+
   if (!execModal) return null
   const { label, namespace } = execModal
 
@@ -187,7 +212,11 @@ export function ExecModal() {
                   })}
                 </div>
               )}
-            {!noShell && <span style={{ fontSize: 10, color: 'var(--mz-text-faint)' }}>ctrl-d · exit</span>}
+            {!noShell && (
+              <span style={{ fontSize: 10, color: 'var(--mz-text-faint)' }}>
+                {status === 'open' ? 'ctrl-d · exit' : 'esc / ctrl-d · close'}
+              </span>
+            )}
             <button onClick={closeExec}
               style={{ fontSize: 18, lineHeight: 1, color: 'var(--mz-text-dim)', background: 'none', border: 'none', cursor: 'pointer', padding: '0 2px' }}
               onMouseEnter={e => e.target.style.color = 'var(--mz-text)'}
@@ -215,6 +244,9 @@ export function ExecModal() {
                   image). There is nothing to exec into.
                 </span>
               )}
+              <span style={{ fontSize: 11, color: 'var(--mz-text-faint)', marginTop: 4 }}>
+                Press <kbd style={kbdStyle}>Esc</kbd> or <kbd style={kbdStyle}>Ctrl-D</kbd> to close.
+              </span>
             </div>
           )}
           {shells && shells.length > 0 && (

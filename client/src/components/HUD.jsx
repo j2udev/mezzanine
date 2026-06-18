@@ -8,8 +8,9 @@ import { ExecModal } from './ExecModal'
 import { HelpModal } from './HelpModal'
 import { ActionMenu } from './ActionMenu'
 
-// Resource names the `:` resource picker can autocomplete/cycle through (Tab). The canonical
-// resource names (deduped alias targets) plus the `ns` namespace-picker shortcut.
+// Built-in resource names the `:` resource picker can autocomplete/cycle through (Tab). The
+// canonical resource names (deduped alias targets) plus the `ns` namespace-picker shortcut.
+// Live CRDs are folded in at render time (#20) so the picker can also find custom resources.
 const COMMAND_OPTIONS = [...new Set([...Object.values(RESOURCE_ALIASES), 'ns'])].sort()
 
 // canonical name → every alias that resolves to it (incl. the canonical itself), so the
@@ -19,13 +20,12 @@ const ALIASES_FOR = (() => {
   for (const [alias, canon] of Object.entries(RESOURCE_ALIASES)) (m[canon] ||= [canon]).push(alias)
   return m
 })()
-// Rank score for an option against the typed stem: [tier, length]. Lower sorts first.
+// Rank score for an alias list against the typed stem: [tier, length]. Lower sorts first.
 // tier 0 = an alias equals the stem (exact), 1 = an alias starts with it (prefix),
 // 2 = an alias merely contains it (substring), Infinity tier = no match. `length` is the
 // shortest matching alias, so the most-direct/sane completion wins (":po" → "pods", not
 // "pdb" via "poddisruptionbudget"). #77
-const aliasScore = (opt, stem) => {
-  const aliases = ALIASES_FOR[opt] || [opt]
+const aliasScore = (aliases, stem) => {
   if (!stem) return [1, Math.min(...aliases.map(a => a.length))]
   let prefix = Infinity, sub = Infinity
   for (const a of aliases) {
@@ -37,7 +37,6 @@ const aliasScore = (opt, stem) => {
   if (sub !== Infinity)    return [2, sub]
   return [Infinity, Infinity]
 }
-const aliasMatch = (opt, stem) => aliasScore(opt, stem)[0] !== Infinity
 
 function Kbd({ children }) {
   return (
@@ -81,6 +80,10 @@ export function HUD({ panelWidth = 288 }) {
   const clearSort       = useStore(s => s.clearSort)
   const groupByNamespace        = useStore(s => s.groupByNamespace)
   const toggleGroupByNamespace  = useStore(s => s.toggleGroupByNamespace)
+  const panelEnabled            = useStore(s => s.panelEnabled)
+  const togglePanel             = useStore(s => s.togglePanel)
+  const sidebarCollapsed        = useStore(s => s.sidebarCollapsed)
+  const toggleSidebar           = useStore(s => s.toggleSidebar)
 
   const setActiveNamespace  = useStore(s => s.setActiveNamespace)
   const setFilter           = useStore(s => s.setFilter)
@@ -101,6 +104,9 @@ export function HUD({ panelWidth = 288 }) {
   useEffect(() => {
     if (filterActive) { filterRef.current?.focus(); filterRef.current?.select() }
   }, [filterActive])
+
+  // Live CRDs fold into the resource picker's candidate pool (#20).
+  const crds = useStore(s => s.crds)
 
   // Items for count/filter display (handles drilldown and cr: prefix)
   const crdResources = useStore(s => s.crdResources)
@@ -127,26 +133,45 @@ export function HUD({ panelWidth = 288 }) {
   // ── Resource-filter mode (#70): the box switches the active resource ──────────
   const resMode = filterMode === 'res'
 
+  // The full candidate set the resource picker can match: built-in resources (each carrying
+  // its alias list for matching) plus every live CRD (#20). A CRD candidate submits its
+  // `cr:group/version/plural` key (what fetchCrdResources / submitCommand expects) and is
+  // matched on its kind, plural, and full name so typing any of them surfaces it.
+  const candidatePool = useMemo(() => {
+    const builtin = COMMAND_OPTIONS.map(n => ({
+      value: n, label: n === 'ns' ? 'namespace (picker)' : n,
+      sublabel: '', aliases: ALIASES_FOR[n] || [n], isCrd: false,
+    }))
+    const custom = (crds || []).map(c => ({
+      value: `cr:${c.group}/${c.version}/${c.plural}`,
+      label: c.kind, sublabel: c.group, isCrd: true,
+      aliases: [c.kind, c.plural, c.name].map(a => a.toLowerCase()),
+    }))
+    return [...builtin, ...custom]
+  }, [crds])
+
   // Candidates for the resource dropdown, ranked by typed text. Matching is alias-aware
-  // (typing "svc" surfaces "services"); prefix matches rank first.
-  const rankCandidates = (stem) => COMMAND_OPTIONS
-    .filter(n => aliasMatch(n, stem))
+  // (typing "svc" surfaces "services", "cert" surfaces Certificate); prefix matches rank first.
+  const rankCandidates = (stem) => candidatePool
+    .map(c => ({ c, score: aliasScore(c.aliases, stem) }))
+    .filter(({ score }) => score[0] !== Infinity)
     .sort((a, b) => {
-      const [at, al] = aliasScore(a, stem), [bt, bl] = aliasScore(b, stem)
-      if (at !== bt) return at - bt        // exact → prefix → substring
-      if (al !== bl) return al - bl        // shortest matching alias first
-      return a.localeCompare(b)
+      if (a.score[0] !== b.score[0]) return a.score[0] - b.score[0]   // exact → prefix → substring
+      if (a.score[1] !== b.score[1]) return a.score[1] - b.score[1]   // shortest matching alias first
+      return a.c.label.localeCompare(b.c.label)
     })
-  const resCandidates = useMemo(() => rankCandidates(command.trim().toLowerCase()), [command])
+    .map(({ c }) => c)
+  const resCandidates = useMemo(() => rankCandidates(command.trim().toLowerCase()), [command, candidatePool])
 
   // Tab completes/cycles through the candidates. The stem (text typed before the first Tab)
   // is held in acStemRef so repeated Tabs cycle off the original input. Shift+Tab reverses.
+  // We fill the box with the candidate's label (readable); Enter/click submits its value.
   const cycleCommand = (dir) => {
     if (acStemRef.current == null) { acStemRef.current = command; acIdxRef.current = -1 }
     const cands = rankCandidates(acStemRef.current.trim().toLowerCase())
     if (!cands.length) return
     acIdxRef.current = (acIdxRef.current + dir + cands.length) % cands.length
-    setCommand(cands[acIdxRef.current])
+    setCommand(cands[acIdxRef.current].label)
   }
 
   // Toggle the box between string-filter and resource-filter modes (re-focuses).
@@ -157,14 +182,46 @@ export function HUD({ panelWidth = 288 }) {
     if (next === 'res') { setCommand(''); acStemRef.current = null; acIdxRef.current = -1 }
   }
 
-  // Pick a resource candidate (Enter on the input, or click in the dropdown).
-  const pickResource = (name) => {
-    if (submitCommand(name)) filterRef.current?.blur()
+  // Pick a resource candidate (Enter on the input, or click in the dropdown). Accepts either a
+  // candidate object (dropdown / top-match) or a raw string (typed text passed straight through).
+  const pickResource = (cand) => {
+    const value = typeof cand === 'string' ? cand : cand.value
+    if (submitCommand(value)) filterRef.current?.blur()
   }
 
   const showBreadcrumb = navStack.length > 0 || !!drilldownLabel
   // A history frame's label = its drilldown leaf (last "›" segment) or its plain resource name.
   const crumbLabel = (f) => f.drilldownLabel ? f.drilldownLabel.split('›').pop().trim() : f.resource
+
+  // Carousel cap (#todo4): the trail is one ordered list - past frames, the current view,
+  // then forward (future) frames. We show at most MAX_CRUMBS of them; when there are more,
+  // the overflow on the LEFT (oldest history) collapses into a single clickable "⋯" that
+  // jumps to the very start of the trail. Slicing the rightmost MAX_CRUMBS keeps the current
+  // view and the most-recent context visible.
+  // 5 visual slots total. When the trail overflows, the leftmost slot becomes the ⋯, so we
+  // show ⋯ + the (MAX_CRUMBS - 1) most-recent crumbs.
+  const MAX_CRUMBS = 5
+  const trail = [
+    ...navStack.map((f, i) => ({
+      key: `b${i}`, label: crumbLabel(f), title: 'back',
+      onClick: () => navGo(-(navStack.length - i)),
+      color: 'var(--mz-accent-2)', opacity: 1, weight: 400,
+    })),
+    {
+      key: 'cur', label: drilldownLabel || activeResource, title: null, onClick: null,
+      color: 'var(--mz-text)', opacity: 1, weight: 500,
+    },
+    ...navFuture.map((f, j) => ({
+      key: `f${j}`, label: crumbLabel(f), title: 'forward',
+      onClick: () => navGo(j + 1),
+      color: 'var(--mz-accent-2)', opacity: 0.7, weight: 400,
+    })),
+  ]
+  // When overflowing, the ⋯ occupies one slot, leaving MAX_CRUMBS - 1 for real crumbs.
+  const overflowing = trail.length > MAX_CRUMBS
+  const visibleCount = overflowing ? MAX_CRUMBS - 1 : MAX_CRUMBS
+  const hiddenCount = Math.max(0, trail.length - visibleCount)
+  const shownTrail = trail.slice(hiddenCount)
 
   // The grouping toggle only matters for namespaced resources viewed across all namespaces.
   const namespacedView = activeNamespace === 'all' && !nsPickerMode && allItems.some(i => i.namespace)
@@ -180,9 +237,19 @@ export function HUD({ panelWidth = 288 }) {
           borderBottom: '1px solid rgba(var(--mz-accent-rgb),0.06)',
         }}
       >
-        {/* Wordmark */}
-        <span className="mezz-wordmark" style={{ fontSize: 22, lineHeight: 1, flexShrink: 0, paddingRight: 2 }}>
-          mezza9
+        {/* Brand wordmark - doubles as the sidebar collapse toggle (#13). It morphs to the
+            compact "mezza9" when the sidebar is collapsed, so the logo itself is the toggle
+            and its state is the visual indication of whether the sidebar is open. */}
+        <span
+          onClick={toggleSidebar}
+          role="button"
+          tabIndex={0}
+          onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleSidebar() } }}
+          title={sidebarCollapsed ? 'Expand sidebar (ctrl+b)' : 'Collapse sidebar (ctrl+b)'}
+          className="mezz-wordmark"
+          style={{ fontSize: 28, lineHeight: 1, flexShrink: 0, paddingRight: 4, cursor: 'pointer', userSelect: 'none' }}
+        >
+          {sidebarCollapsed ? 'mezza9' : 'mezzanine'}
         </span>
 
         {/* Demo-mode badge (no live cluster - the NotConnected screen covers "disconnected") */}
@@ -281,8 +348,14 @@ export function HUD({ panelWidth = 288 }) {
                 if (resMode && e.key === 'Tab') { e.preventDefault(); cycleCommand(e.shiftKey ? -1 : 1); return }
                 if (e.key === 'Enter') {
                   e.preventDefault()
-                  if (resMode) pickResource(resCandidates[0] && !RESOURCE_ALIASES[command.trim().toLowerCase()] ? resCandidates[0] : command)
-                  else filterRef.current?.blur()
+                  // Submit the exact typed text when it's a known alias (so the user can type a
+                  // canonical name and bypass the ranking); otherwise submit the top candidate
+                  // object (which may be a built-in resource or a CRD), falling back to the
+                  // raw text so an unknown entry still routes through submitCommand.
+                  if (resMode) {
+                    const typed = command.trim().toLowerCase()
+                    pickResource(RESOURCE_ALIASES[typed] ? typed : (resCandidates[0] || typed))
+                  } else filterRef.current?.blur()
                 }
                 if (e.key === 'Escape') {
                   e.preventDefault()
@@ -317,22 +390,32 @@ export function HUD({ panelWidth = 288 }) {
               {resCandidates.length === 0 && (
                 <div style={{ padding: '6px 12px', fontSize: 11, color: 'var(--mz-text-dim)' }}>no match</div>
               )}
-              {resCandidates.map(name => {
-                const isCurrent = name === command.trim().toLowerCase()
+              {resCandidates.map(cand => {
+                const isActive = activeResource === cand.value
                 return (
-                  <div key={name}
-                    onMouseDown={e => { e.preventDefault(); pickResource(name) }}
+                  <div key={cand.value}
+                    onMouseDown={e => { e.preventDefault(); pickResource(cand) }}
                     style={{
-                      display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                      display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8,
                       padding: '4px 12px', cursor: 'pointer', fontSize: 11,
-                      color: isCurrent ? 'var(--mz-alt)' : 'var(--mz-text-mid)',
-                      background: isCurrent ? 'rgba(var(--mz-alt-rgb),0.15)' : 'transparent',
+                      color: isActive ? 'var(--mz-alt)' : 'var(--mz-text-mid)',
+                      background: isActive ? 'rgba(var(--mz-alt-rgb),0.15)' : 'transparent',
                     }}
-                    onMouseEnter={e => { if (!isCurrent) e.currentTarget.style.background = 'rgba(255,255,255,0.05)' }}
-                    onMouseLeave={e => { if (!isCurrent) e.currentTarget.style.background = 'transparent' }}
+                    onMouseEnter={e => { if (!isActive) e.currentTarget.style.background = 'rgba(255,255,255,0.05)' }}
+                    onMouseLeave={e => { if (!isActive) e.currentTarget.style.background = 'transparent' }}
                   >
-                    <span style={{ textTransform: 'capitalize' }}>{name === 'ns' ? 'namespace (picker)' : name}</span>
-                    {activeResource === name && <span style={{ fontSize: 9, color: 'var(--mz-alt)' }}>● current</span>}
+                    <span style={{ textTransform: cand.isCrd ? 'none' : 'capitalize', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                      {cand.label}
+                    </span>
+                    <span style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
+                      {cand.isCrd && (
+                        <span style={{ fontSize: 9, color: 'var(--mz-text-faint)', fontFamily: 'monospace' }}>
+                          {cand.sublabel.split('.')[0]}
+                        </span>
+                      )}
+                      {cand.isCrd && <span style={{ fontSize: 8, color: 'var(--mz-alt)', letterSpacing: '0.06em' }}>CRD</span>}
+                      {isActive && <span style={{ fontSize: 9, color: 'var(--mz-alt)' }}>● current</span>}
+                    </span>
                   </div>
                 )
               })}
@@ -362,10 +445,28 @@ export function HUD({ panelWidth = 288 }) {
             {groupByNamespace ? 'grouped' : 'flat'}
           </button>
         )}
+
+        {/* Detail-drawer on/off toggle (#todo3). Off = the right panel never opens, even on
+            selection, giving the list its full width. State persists across reloads. */}
+        <button
+          onClick={togglePanel}
+          title="Toggle detail drawer (ctrl+\\)"
+          style={{
+            display: 'flex', alignItems: 'center', gap: 5, flexShrink: 0, cursor: 'pointer',
+            padding: '2px 8px', borderRadius: 4, fontSize: 10, letterSpacing: '0.04em',
+            fontFamily: 'inherit',
+            color: panelEnabled ? 'var(--mz-accent)' : 'var(--mz-accent-2)',
+            background: panelEnabled ? 'rgba(var(--mz-accent-rgb),0.1)' : 'rgba(255,255,255,0.04)',
+            border: `1px solid ${panelEnabled ? 'rgba(var(--mz-accent-rgb),0.3)' : 'rgba(255,255,255,0.1)'}`,
+          }}
+        >
+          <span style={{ fontSize: 12, lineHeight: 1 }}>{panelEnabled ? '◧' : '▭'}</span>
+          {panelEnabled ? 'drawer' : 'wide'}
+        </button>
       </div>
 
       {/* ── Detail panel ─────────────────────────────────────────── */}
-      {selectedId && <DetailPanel width={panelWidth} />}
+      {panelEnabled && selectedId && <DetailPanel width={panelWidth} />}
 
       {/* ── Action modal ─────────────────────────────────────────── */}
       <ActionModal />
@@ -438,33 +539,33 @@ export function HUD({ panelWidth = 288 }) {
               borderRadius: 4, padding: '2px 8px', fontSize: 10, whiteSpace: 'nowrap',
               overflowX: 'auto', overflowY: 'hidden',
             }}>
-              {/* Past frames (oldest → newest), each jumps back to that depth */}
-              {navStack.map((f, i) => (
-                <span key={`b${i}`} style={{ display: 'inline-flex', alignItems: 'center', flexShrink: 0 }}>
+              {/* Overflow ⋯ - the leftmost crumb when the trail exceeds MAX_CRUMBS. Clicking it
+                  jumps all the way back to the oldest frame (carousel cap, #todo4). */}
+              {hiddenCount > 0 && (
+                <span style={{ display: 'inline-flex', alignItems: 'center', flexShrink: 0 }}>
                   <span
-                    onClick={() => navGo(-(navStack.length - i))}
-                    title="back"
+                    onClick={() => navGo(-navStack.length)}
+                    title={`${hiddenCount} more - jump to start`}
                     style={{ color: 'var(--mz-accent-2)', cursor: 'pointer', whiteSpace: 'nowrap' }}
                   >
-                    {crumbLabel(f)}
+                    ⋯
                   </span>
                   <span style={{ color: 'var(--mz-text-faint)', padding: '0 4px' }}>›</span>
                 </span>
-              ))}
-              {/* Current view (not clickable) */}
-              <span style={{ color: 'var(--mz-text)', whiteSpace: 'nowrap', fontWeight: 500, flexShrink: 0 }}>
-                {drilldownLabel || activeResource}
-              </span>
-              {/* Future frames (forward history), each jumps forward to that depth */}
-              {navFuture.map((f, j) => (
-                <span key={`f${j}`} style={{ display: 'inline-flex', alignItems: 'center', flexShrink: 0 }}>
-                  <span style={{ color: 'var(--mz-text-faint)', padding: '0 4px' }}>›</span>
+              )}
+              {/* The capped trail: past → current → future, separated by › */}
+              {shownTrail.map((c, i) => (
+                <span key={c.key} style={{ display: 'inline-flex', alignItems: 'center', flexShrink: 0 }}>
+                  {i > 0 && <span style={{ color: 'var(--mz-text-faint)', padding: '0 4px' }}>›</span>}
                   <span
-                    onClick={() => navGo(j + 1)}
-                    title="forward"
-                    style={{ color: 'var(--mz-accent-2)', cursor: 'pointer', whiteSpace: 'nowrap', opacity: 0.7 }}
+                    onClick={c.onClick || undefined}
+                    title={c.title || undefined}
+                    style={{
+                      color: c.color, opacity: c.opacity, fontWeight: c.weight,
+                      cursor: c.onClick ? 'pointer' : 'default', whiteSpace: 'nowrap',
+                    }}
                   >
-                    {crumbLabel(f)}
+                    {c.label}
                   </span>
                 </span>
               ))}

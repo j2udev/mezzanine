@@ -35,12 +35,15 @@ export default function App() {
   const sidebarCollapsed = useStore(s => s.sidebarCollapsed)
   const selectedId       = useStore(s => s.selectedId)
   const modal            = useStore(s => s.modal)
+  const panelEnabled     = useStore(s => s.panelEnabled)
   // Re-render the tree on theme switch so JS-computed colors (statusColor/getNsColor)
   // re-resolve; CSS-var colors repaint on their own. Children aren't memoized, so an
   // App re-render cascades.
   useStore(s => s.themeId)
-  const sidebarW = sidebarCollapsed ? 36 : 200
-  const panelOpen = !!selectedId && !modal
+  // Collapsed sidebar is fully hidden (0 width): the collapse toggle now lives in the top-bar
+  // wordmark (#13), so there's no rail control left to keep on screen. Frees list real estate.
+  const sidebarW = sidebarCollapsed ? 0 : 200
+  const panelOpen = panelEnabled && !!selectedId && !modal
 
   return (
     <ErrorBoundary>

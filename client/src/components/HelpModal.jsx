@@ -8,9 +8,10 @@ const SECTIONS = [
     keys: [
       ['j / k', 'Select prev / next row'],
       ['gg / G', 'First / last row'],
-      ['Enter', 'Drill into resource'],
+      ['Enter', 'Drill in (CRD: list its resources)'],
       ['[ / ]', 'History back / forward'],
       ['ctrl+b', 'Toggle sidebar'],
+      ['ctrl+\\', 'Toggle detail drawer'],
       ['Esc', 'Step back / clear'],
     ],
   },
@@ -26,7 +27,7 @@ const SECTIONS = [
       ['ctrl+g', 'Toggle namespace grouping'],
       ['Shift+T', 'Theme switcher'],
       ['/', 'Filter by name / namespace'],
-      [':', 'Command (:pods, :ns, :theme …)'],
+      [':', 'Resource picker (:pods, :ns, CRDs …)'],
     ],
   },
   {

@@ -68,6 +68,13 @@ export function useKeys() {
         return
       }
 
+      // ctrl+\: toggle the right detail drawer on/off (wide mode)
+      if (e.ctrlKey && e.key === '\\') {
+        e.preventDefault()
+        s.togglePanel()
+        return
+      }
+
       // ctrl+z: toggle faults-only view
       if (e.ctrlKey && e.key === 'z') {
         e.preventDefault()
@@ -186,6 +193,13 @@ export function useKeys() {
           if (s.nsPickerMode) {
             const ns = (s.namespaces || []).find(n => n.id === s.selectedId)
             if (ns) s.exitNsPickerMode(ns.name)
+            break
+          }
+
+          // CRD list: Enter jumps to that definition's custom resources (#20)
+          if (s.activeResource === 'crds') {
+            const crd = s.getFilteredItems().find(i => i.id === s.selectedId)
+            if (crd) s.fetchCrdResources(crd.group, crd.version, crd.plural)
             break
           }
 

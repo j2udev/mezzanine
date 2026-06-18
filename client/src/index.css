@@ -7,16 +7,16 @@
    and keeps the app usable if JS hasn't applied a stored theme yet. Keep in sync with
    THEMES.mezzanine in theme.js. */
 :root {
-  --mz-bg: #0a1220;          --mz-bg-rgb: 10,18,32;
-  --mz-surface: #0c1626;     --mz-surface-rgb: 12,22,38;
-  --mz-backdrop: #01050e;    --mz-backdrop-rgb: 1,5,14;
-  --mz-border: #1b3048;      --mz-border-rgb: 27,48,72;
-  --mz-text-bright: #f0f8ff; --mz-text-bright-rgb: 240,248,255;
-  --mz-text: #cce0f5;        --mz-text-rgb: 204,224,245;
-  --mz-text-mid: #a8c4dc;    --mz-text-mid-rgb: 168,196,220;
-  --mz-text-dim: #7aa8c8;    --mz-text-dim-rgb: 122,168,200;
-  --mz-text-faint: #6488a8;  --mz-text-faint-rgb: 100,136,168;
-  --mz-text-muted: #a0b2c4;  --mz-text-muted-rgb: 160,178,196;
+  --mz-bg: #0f1a2e;          --mz-bg-rgb: 15,26,46;
+  --mz-surface: #13233c;     --mz-surface-rgb: 19,35,60;
+  --mz-backdrop: #040b18;    --mz-backdrop-rgb: 4,11,24;
+  --mz-border: #244062;      --mz-border-rgb: 36,64,98;
+  --mz-text-bright: #f4fbff; --mz-text-bright-rgb: 244,251,255;
+  --mz-text: #dcefff;        --mz-text-rgb: 220,239,255;
+  --mz-text-mid: #bcd8f0;    --mz-text-mid-rgb: 188,216,240;
+  --mz-text-dim: #92bdda;    --mz-text-dim-rgb: 146,189,218;
+  --mz-text-faint: #7aa3c2;  --mz-text-faint-rgb: 122,163,194;
+  --mz-text-muted: #b2c6d8;  --mz-text-muted-rgb: 178,198,216;
   --mz-accent: #00e0ff;          --mz-accent-rgb: 0,224,255;
   --mz-accent-strong: #00b8ff;   --mz-accent-strong-rgb: 0,184,255;
   --mz-accent-2: #8cc8e8;        --mz-accent-2-rgb: 140,200,232;
@@ -68,8 +68,13 @@
 body {
   font-family: 'Courier New', 'Lucida Console', monospace;
   background: var(--mz-bg);
+  color: var(--mz-text);
   overflow: hidden;
   -webkit-font-smoothing: antialiased;
+  /* Slightly heavier + a faint glow so UI text reads "neon" like the wordmark,
+     without the full tube-light treatment of .mezz-wordmark. */
+  font-weight: 500;
+  text-shadow: 0 0 1px rgba(var(--mz-accent-rgb), 0.12);
 }
 
 canvas { display: block; }
