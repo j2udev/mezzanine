@@ -3,7 +3,7 @@ import { useStore } from '../store'
 
 function getWsUrl() {
   if (import.meta.env.VITE_WS_URL) return import.meta.env.VITE_WS_URL
-  // Always connect through the same host — Vite proxies /ws to the backend.
+  // Always connect through the same host - Vite proxies /ws to the backend.
   // This works whether accessed via localhost, devcontainer forwarding, or tunnel.
   const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
   return `${proto}//${window.location.host}/ws`

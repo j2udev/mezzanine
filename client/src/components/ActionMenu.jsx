@@ -4,7 +4,7 @@ import { useStore } from '../store'
 import { applicableActions } from '../actions'
 
 // Scalable actions palette (opened with `a`). Lists every action applicable to the
-// selected object — including destructive ones — grouped, filterable, keyboard-driven.
+// selected object - including destructive ones - grouped, filterable, keyboard-driven.
 // Driven entirely by the actions.js registry, so new actions appear here for free.
 export function ActionMenu() {
   const open           = useStore(s => s.actionMenuOpen)
@@ -32,7 +32,7 @@ export function ActionMenu() {
     return all.filter(a => a.label.toLowerCase().includes(q) || a.id.includes(q))
   }, [activeResource, filter])
 
-  // Open in keyboard-nav mode: search is NOT focused — j/k scrolls, Enter / direct
+  // Open in keyboard-nav mode: search is NOT focused - j/k scrolls, Enter / direct
   // shortcuts run, `/` focuses the filter (matches the rest of the app).
   useEffect(() => { if (open) { setFilter(''); setIdx(0); setSearchFocused(false) } }, [open])
   useEffect(() => { setIdx(0) }, [filter])

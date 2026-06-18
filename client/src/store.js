@@ -1,6 +1,14 @@
 import { create } from 'zustand'
 import { applyTheme, getStoredThemeId } from './theme'
 
+// Snapshot of the current view, pushed onto navStack so `[`/`]` can restore it. Drilldowns,
+// owner-jumps AND plain resource switches all record one, so history works browser-style (#79).
+const navFrame = (s) => ({
+  resource: s.activeResource, selectedId: s.selectedId, namespace: s.activeNamespace,
+  filter: s.filter, filterPinned: s.filterPinned,
+  drilldownItems: s.drilldownItems, drilldownLabel: s.drilldownLabel,
+})
+
 export const CLUSTER_SCOPED_RESOURCES = new Set([
   'nodes', 'pvs', 'namespaces', 'crds', 'clusterroles', 'clusterrolebindings', 'storageclasses',
 ])
@@ -53,7 +61,7 @@ const HEALTHY_STATUSES = new Set([
   'Bound', 'Ready', 'Deployed', 'Normal',
 ])
 
-// Statuses that are terminal-success / settled — never faults even when ready is 0/1
+// Statuses that are terminal-success / settled - never faults even when ready is 0/1
 // (a completed Job pod reports 0/1 by design; a Bound PVC has no readiness).
 const TERMINAL_OK_STATUSES = new Set(['Succeeded', 'Complete', 'Completed', 'Bound'])
 
@@ -96,7 +104,7 @@ export function sortItems(items, sortKey, sortDir) {
 
 // Produce the flat list in the exact order it is displayed: grouped by namespace
 // (namespace name order, matching ResourceList) only when namespace grouping is opted
-// into AND the "all namespaces" view is active AND namespaced items exist — otherwise a
+// into AND the "all namespaces" view is active AND namespaced items exist - otherwise a
 // flat list (k9s default) sorted as a whole.
 // Keeping nav (j/k) and the visible list in lockstep depends on this single ordering.
 export function arrangeForDisplay(items, { activeNamespace, sortKey, sortDir, groupByNamespace }) {
@@ -197,17 +205,20 @@ export const useStore = create((set, get) => ({
   command: '',
   modal: null,
   pfModal: null,         // { item, resource } when the port-forward dialog is open
+  execModal: null,       // { namespace, pod, container, label } when the shell terminal is open (#81)
   deleteConfirm: null,   // { item, resource } when ctrl+d confirm is pending
 
   setData: (data) => set(data),
   setConnected: (v) => set({ connected: v }),
 
-  setActiveResource: (r) => set({
+  setActiveResource: (r) => set(s => ({
     activeResource: r, selectedId: null, selectedIds: new Set(), filter: '', filterActive: false, filterPinned: false,
-    navStack: [], navFuture: [], drilldownItems: null, drilldownLabel: '',
+    // Record the view we're leaving so `[` can come back to it (skip self-switches). (#79)
+    navStack: r === s.activeResource ? s.navStack : [...s.navStack, navFrame(s)],
+    navFuture: [], drilldownItems: null, drilldownLabel: '',
     nsPickerMode: false, previousResource: null,
     sortKey: null, sortDir: 'asc',
-  }),
+  })),
   setActiveNamespace: (ns) => set({ activeNamespace: ns, selectedId: null, selectedIds: new Set() }),
   setSelected: (id) => set({ selectedId: id }),
   toggleMultiSelect: (id) => set(s => {
@@ -262,9 +273,11 @@ export const useStore = create((set, get) => ({
 
     const resolved = RESOURCE_ALIASES[trimmed]
     if (resolved) {
+      const s = get()
       set({
         activeResource: resolved, selectedId: null, selectedIds: new Set(), filter: '', filterActive: false, filterPinned: false,
-        navStack: [], navFuture: [], drilldownItems: null, drilldownLabel: '',
+        navStack: resolved === s.activeResource ? s.navStack : [...s.navStack, navFrame(s)],
+        navFuture: [], drilldownItems: null, drilldownLabel: '',
         nsPickerMode: false, previousResource: null,
         sortKey: null, sortDir: 'asc',
         command: '', commandActive: false, filterMode: 'str',
@@ -357,17 +370,8 @@ export const useStore = create((set, get) => ({
 
   drillDown: (target) => {
     const s = get()
-    const frame = {
-      resource: s.activeResource,
-      selectedId: s.selectedId,
-      namespace: s.activeNamespace,
-      filter: s.filter,
-      filterPinned: s.filterPinned,
-      drilldownItems: s.drilldownItems,
-      drilldownLabel: s.drilldownLabel,
-    }
     set({
-      navStack: [...s.navStack, frame],
+      navStack: [...s.navStack, navFrame(s)],
       navFuture: [],
       activeResource: target.resource,
       drilldownItems: target.items,
@@ -383,14 +387,9 @@ export const useStore = create((set, get) => ({
     const s = get()
     if (!s.navStack.length) return
     const prev = s.navStack[s.navStack.length - 1]
-    const cur = {
-      resource: s.activeResource, selectedId: s.selectedId, namespace: s.activeNamespace,
-      filter: s.filter, filterPinned: s.filterPinned,
-      drilldownItems: s.drilldownItems, drilldownLabel: s.drilldownLabel,
-    }
     set({
       navStack: s.navStack.slice(0, -1),
-      navFuture: [cur, ...s.navFuture],
+      navFuture: [navFrame(s), ...s.navFuture],
       activeResource: prev.resource,
       selectedId: prev.selectedId,
       activeNamespace: prev.namespace,
@@ -405,13 +404,8 @@ export const useStore = create((set, get) => ({
     const s = get()
     if (!s.navFuture.length) return
     const next = s.navFuture[0]
-    const cur = {
-      resource: s.activeResource, selectedId: s.selectedId, namespace: s.activeNamespace,
-      filter: s.filter, filterPinned: s.filterPinned,
-      drilldownItems: s.drilldownItems, drilldownLabel: s.drilldownLabel,
-    }
     set({
-      navStack: [...s.navStack, cur],
+      navStack: [...s.navStack, navFrame(s)],
       navFuture: s.navFuture.slice(1),
       activeResource: next.resource,
       selectedId: next.selectedId,
@@ -423,12 +417,21 @@ export const useStore = create((set, get) => ({
     })
   },
 
+  // Jump `delta` steps through history at once (negative = back, positive = forward), so a
+  // footer breadcrumb crumb can navigate straight to its point in the stack. Reuses the
+  // single-step ops, which read fresh state each call, so looping composes correctly.
+  navGo: (delta) => {
+    const step = delta < 0 ? get().navBack : get().navForwardStep
+    for (let i = 0; i < Math.abs(delta); i++) step()
+  },
+
   fetchCrdResources: async (group, version, plural) => {
     const key = `${group}/${version}/${plural}`
-    set({
+    set(s => ({
       activeResource: `cr:${key}`, selectedId: null, filter: '', filterActive: false, filterPinned: false,
-      navStack: [], navFuture: [], drilldownItems: null, drilldownLabel: '',
-    })
+      navStack: `cr:${key}` === s.activeResource ? s.navStack : [...s.navStack, navFrame(s)],
+      navFuture: [], drilldownItems: null, drilldownLabel: '',
+    }))
     try {
       const res = await fetch(`/api/crd/${group}/${version}/${plural}`)
       const { items } = await res.json()
@@ -443,7 +446,7 @@ export const useStore = create((set, get) => ({
   cancelDelete: () => set({ deleteConfirm: null }),
 
   // Stop the selected port-forward(s) and drop them from the table (#53). Used for both
-  // ctrl+d and ctrl+k on the portforwards view — stopping a forward is non-destructive
+  // ctrl+d and ctrl+k on the portforwards view - stopping a forward is non-destructive
   // (no cluster state changes, trivially re-created), so it needs no confirm dialog. Works
   // in demo mode too (the backend tracks simulated forwards the same way).
   stopSelectedForwards: () => {
@@ -524,6 +527,23 @@ export const useStore = create((set, get) => ({
   },
   closePortForward: () => set({ pfModal: null }),
 
+  // Shell into a pod / container (#81). A container-drilldown row carries { pod, name(=container) };
+  // a plain pod row carries containers[] (strings or {name}) - default to its first container.
+  openExec: () => {
+    const s = get()
+    if (!s.selectedId) return
+    const item = s.getItems().find(i => i.id === s.selectedId)
+    if (!item) return
+    if (s.activeResource === 'containers') {
+      set({ execModal: { namespace: item.namespace, pod: item.pod, container: item.name, label: `${item.pod} / ${item.name}` } })
+    } else if (s.activeResource === 'pods') {
+      const c0 = (item.containers || [])[0]
+      const container = typeof c0 === 'string' ? c0 : c0?.name
+      set({ execModal: { namespace: item.namespace, pod: item.name, container, label: item.name } })
+    }
+  },
+  closeExec: () => set({ execModal: null }),
+
   // Jump to the controller that owns the selected item (shift+j). Pushes a nav frame
   // so `[` returns. No-op if the item has no owner or the owner isn't in current data.
   jumpToOwner: () => {
@@ -534,13 +554,8 @@ export const useStore = create((set, get) => ({
     const target = (s[owner.resource] || []).find(i =>
       i.name === owner.name && (owner.namespace ? i.namespace === owner.namespace : true))
     if (!target) return
-    const frame = {
-      resource: s.activeResource, selectedId: s.selectedId, namespace: s.activeNamespace,
-      filter: s.filter, filterPinned: s.filterPinned,
-      drilldownItems: s.drilldownItems, drilldownLabel: s.drilldownLabel,
-    }
     set({
-      navStack: [...s.navStack, frame], navFuture: [],
+      navStack: [...s.navStack, navFrame(s)], navFuture: [],
       activeResource: owner.resource, drilldownItems: null, drilldownLabel: '',
       activeNamespace: owner.namespace || s.activeNamespace,
       filter: '', filterActive: false, filterPinned: false,

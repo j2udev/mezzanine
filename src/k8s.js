@@ -63,6 +63,16 @@ async function getClient() {
   }
 }
 
+// Exec into a pod (task 81). Returns a client-node Exec bound to the live cluster, or
+// null when no cluster is reachable. The Exec opens its own WebSocket to the apiserver's
+// pod/exec subresource; server.js bridges that to the browser terminal.
+export async function getExec() {
+  const kc = await getClient()
+  if (!kc) return null
+  const lib = await loadK8s()
+  return new lib.Exec(kc)
+}
+
 function age(ts) {
   if (!ts) return ''
   const secs = Math.floor((Date.now() - new Date(ts).getTime()) / 1000)

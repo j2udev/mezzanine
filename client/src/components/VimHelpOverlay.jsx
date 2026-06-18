@@ -1,7 +1,7 @@
 import { useEffect } from 'react'
 
 // Vim cheatsheet for the CodeMirror-backed editor (#61). The actual keybindings are
-// provided by @replit/codemirror-vim — this is just a reference. Opened with `?` from
+// provided by @replit/codemirror-vim - this is just a reference. Opened with `?` from
 // NORMAL/VISUAL mode (or the footer "? vim keys" hint).
 const SECTIONS = [
   {
@@ -109,7 +109,7 @@ export function VimHelpOverlay({ onClose }) {
           position: 'sticky', top: 0, background: 'rgba(var(--mz-surface-rgb),0.98)',
         }}>
           <span style={{ fontSize: 12, fontWeight: 'bold', letterSpacing: '0.16em', color: 'var(--mz-warn)' }}>
-            VIM KEYS — EDIT MODE
+            VIM KEYS - EDIT MODE
           </span>
           <span style={{ fontSize: 10, color: 'var(--mz-text-faint)' }}>? · ESC · close</span>
         </div>
@@ -141,7 +141,7 @@ export function VimHelpOverlay({ onClose }) {
           ))}
         </div>
         <div style={{ padding: '0 22px 16px', fontSize: 10, color: 'var(--mz-text-dim)' }}>
-          Powered by CodeMirror vim — most standard vim commands work, including counts (e.g. 3dd, 5j).
+          Powered by CodeMirror vim - most standard vim commands work, including counts (e.g. 3dd, 5j).
         </div>
       </div>
     </div>

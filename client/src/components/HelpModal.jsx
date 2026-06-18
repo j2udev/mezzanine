@@ -1,5 +1,4 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { alpha } from '../theme'
 import { useStore } from '../store'
 
 const SECTIONS = [
@@ -97,10 +96,9 @@ export function HelpModal() {
   const setHelpOpen = useStore(s => s.setHelpOpen)
 
   const [filter, setFilter]               = useState('')
-  const [idx, setIdx]                     = useState(0)
   const [searchFocused, setSearchFocused] = useState(false)
   const inputRef    = useRef()
-  const selectedRef = useRef()
+  const scrollRef   = useRef()
 
   const matches = useMemo(() => {
     if (!filter) return FLAT
@@ -119,10 +117,8 @@ export function HelpModal() {
     return [...map.entries()]
   }, [matches])
 
-  // Open in keyboard-nav mode (search not focused): j/k scrolls, `/` focuses the filter.
-  useEffect(() => { if (helpOpen) { setFilter(''); setIdx(0); setSearchFocused(false) } }, [helpOpen])
-  useEffect(() => { setIdx(0) }, [filter])
-  useEffect(() => { selectedRef.current?.scrollIntoView({ block: 'nearest' }) }, [idx])
+  // Open with the filter unfocused: j/k just scrolls the modal, `/` focuses the filter (#74).
+  useEffect(() => { if (helpOpen) { setFilter(''); setSearchFocused(false) } }, [helpOpen])
 
   useEffect(() => {
     if (!helpOpen) return
@@ -132,17 +128,21 @@ export function HelpModal() {
         if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); inputRef.current?.blur() }
         return
       }
+      const el = scrollRef.current
       if (e.key === 'Escape' || e.key === '?')    { e.preventDefault(); e.stopPropagation(); setHelpOpen(false); return }
       if (e.key === '/')                          { e.preventDefault(); e.stopPropagation(); inputRef.current?.focus(); return }
-      if (e.key === 'j' || e.key === 'ArrowDown') { e.preventDefault(); e.stopPropagation(); setIdx(i => Math.min(i + 1, matches.length - 1)); return }
-      if (e.key === 'k' || e.key === 'ArrowUp')   { e.preventDefault(); e.stopPropagation(); setIdx(i => Math.max(i - 1, 0)); return }
+      if (e.key === 'j' || e.key === 'ArrowDown') { e.preventDefault(); e.stopPropagation(); el?.scrollBy({ top: 48 });  return }
+      if (e.key === 'k' || e.key === 'ArrowUp')   { e.preventDefault(); e.stopPropagation(); el?.scrollBy({ top: -48 }); return }
+      if (e.key === 'd' && e.ctrlKey)             { e.preventDefault(); e.stopPropagation(); el?.scrollBy({ top: (el.clientHeight / 2) });  return }
+      if (e.key === 'u' && e.ctrlKey)             { e.preventDefault(); e.stopPropagation(); el?.scrollBy({ top: -(el.clientHeight / 2) }); return }
+      if (e.key === 'g')                          { e.preventDefault(); e.stopPropagation(); el?.scrollTo({ top: 0 }); return }
+      if (e.key === 'G')                          { e.preventDefault(); e.stopPropagation(); el?.scrollTo({ top: el.scrollHeight }); return }
     }
     window.addEventListener('keydown', onKey, true)
     return () => window.removeEventListener('keydown', onKey, true)
-  }, [helpOpen, setHelpOpen, searchFocused, matches.length])
+  }, [helpOpen, setHelpOpen, searchFocused])
 
   if (!helpOpen) return null
-  let flatIdx = -1
 
   return (
     <div
@@ -154,6 +154,7 @@ export function HelpModal() {
       }}
     >
       <div
+        ref={scrollRef}
         onClick={e => e.stopPropagation()}
         style={{
           width: 'min(820px, 94vw)', maxHeight: '86vh', overflowY: 'auto',
@@ -212,30 +213,23 @@ export function HelpModal() {
                 fontSize: 10, fontWeight: 'bold', letterSpacing: '0.12em',
                 color, marginBottom: 8, marginTop: 6,
               }}>{title}</div>
-              {items.map(({ k, label }) => {
-                flatIdx += 1
-                const selected = flatIdx === idx
-                return (
-                  <div key={k + label}
-                    ref={selected ? selectedRef : null}
-                    style={{
-                      display: 'flex', alignItems: 'center', gap: 10,
-                      padding: '3px 6px', margin: '0 -6px', fontSize: 11, borderRadius: 4,
-                      background: selected ? `${alpha(color, 12)}` : 'transparent',
-                      borderLeft: `2px solid ${selected ? color : 'transparent'}`,
-                    }}>
-                    <span style={{ flexShrink: 0, minWidth: 96 }}>
-                      {k.split(' / ').map((part, i, arr) => (
-                        <span key={part}>
-                          <Kbd>{part}</Kbd>
-                          {i < arr.length - 1 && <span style={{ color: 'var(--mz-text-dim)', margin: '0 2px' }}>/</span>}
-                        </span>
-                      ))}
-                    </span>
-                    <span style={{ color: selected ? 'var(--mz-text)' : 'var(--mz-text-dim)' }}>{label}</span>
-                  </div>
-                )
-              })}
+              {items.map(({ k, label }) => (
+                <div key={k + label}
+                  style={{
+                    display: 'flex', alignItems: 'center', gap: 10,
+                    padding: '3px 6px', margin: '0 -6px', fontSize: 11, borderRadius: 4,
+                  }}>
+                  <span style={{ flexShrink: 0, minWidth: 96 }}>
+                    {k.split(' / ').map((part, i, arr) => (
+                      <span key={part}>
+                        <Kbd>{part}</Kbd>
+                        {i < arr.length - 1 && <span style={{ color: 'var(--mz-text-dim)', margin: '0 2px' }}>/</span>}
+                      </span>
+                    ))}
+                  </span>
+                  <span style={{ color: 'var(--mz-text-dim)' }}>{label}</span>
+                </div>
+              ))}
             </div>
           ))}
         </div>

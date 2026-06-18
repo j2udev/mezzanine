@@ -9,7 +9,7 @@ function Field({ label, value }) {
     ? value.join(', ')
     : typeof value === 'object' && value !== null
       ? JSON.stringify(value)
-      : String(value ?? '—')
+      : String(value ?? '-')
   return (
     <div>
       <div className="text-[10px] uppercase tracking-widest mb-0.5" style={{ color: 'var(--mz-text-dim)' }}>{label}</div>
@@ -63,7 +63,7 @@ export function DetailPanel({ width = 288 }) {
         </button>
       </div>
 
-      {/* Action chips — wrap instead of overflowing; scales to any number of actions */}
+      {/* Action chips - wrap instead of overflowing; scales to any number of actions */}
       {(visibleActions.length > 0) && (
         <div className="px-2 py-2 flex flex-wrap gap-1 items-center flex-shrink-0"
           style={{ borderBottom: '1px solid rgba(var(--mz-accent-rgb),0.08)' }}>

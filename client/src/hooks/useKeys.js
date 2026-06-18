@@ -30,6 +30,10 @@ export function useKeys() {
         return
       }
 
+      // The shell terminal owns the keyboard entirely (every key goes to xterm, including
+      // Esc - vim etc. need it). ExecModal closes via its own × button / shell exit (#81).
+      if (s.execModal) return
+
       if (s.helpOpen) {
         if (e.key === 'Escape' || e.key === '?') { e.preventDefault(); s.setHelpOpen(false) }
         return
@@ -96,7 +100,7 @@ export function useKeys() {
       if (s.filterActive) return
 
       // Object actions from the registry (logs/describe/yaml/edit/decode, helm v/m/n/h,
-      // ⇧f port-forward, ⇧j owner). Single source of truth in actions.js — keyed,
+      // ⇧f port-forward, ⇧j owner). Single source of truth in actions.js - keyed,
       // non-danger actions are dispatched here so a new action needs no change to this file.
       if (s.selectedId) {
         const action = actionForKey(e, s.activeResource)

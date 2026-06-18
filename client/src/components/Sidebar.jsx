@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { alpha } from '../theme'
 import { useStore } from '../store'
 
-// One accent color per section — color now encodes the resource *category* instead of
+// One accent color per section - color now encodes the resource *category* instead of
 // being seemingly-random per item (#69). The highlight/active color a row gets is its
 // group's color, so clicking around the sidebar reads as a coherent scheme.
 const CUSTOM_COLOR = 'var(--mz-alt)'
@@ -172,7 +172,7 @@ export function Sidebar() {
       transition: 'width 0.18s ease', overflow: 'hidden',
       zIndex: 5, flexShrink: 0,
     }}>
-      {/* Collapse toggle — top */}
+      {/* Collapse toggle - top */}
       <div
         onClick={toggleSidebar}
         style={{

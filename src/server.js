@@ -6,10 +6,11 @@ import { fileURLToPath } from 'url'
 import { dirname, join } from 'path'
 import { existsSync } from 'fs'
 import { exec, spawn } from 'child_process'
+import { PassThrough, Writable } from 'stream'
 import { promisify } from 'util'
 import cors from 'cors'
 import yaml from 'js-yaml'
-import { fetchResources, fetchCrdInstances } from './k8s.js'
+import { fetchResources, fetchCrdInstances, getExec } from './k8s.js'
 import { getMockLogs, getMockDescribe, getMockYaml, getMockCrdResources, getMockHelmValues, getMockHelmAllValues, getMockHelmManifest, getMockHelmHistory, getMockHelmNotes } from './mock.js'
 
 const execAsync = promisify(exec)
@@ -72,11 +73,117 @@ async function refresh() {
   }
 }
 
-wss.on('connection', (ws) => {
+wss.on('connection', (ws, req) => {
+  // /ws/exec is an interactive pod shell session (task 81), not a data-stream subscriber.
+  if ((req.url || '').startsWith('/ws/exec')) { handleExec(ws, req); return }
   clients.add(ws)
   ws.send(JSON.stringify({ type: 'update', data: { ...latest, portforwards: pfList() } }))
   ws.on('close', () => clients.delete(ws))
   ws.on('error', () => clients.delete(ws))
+})
+
+// Bridge a browser terminal <-> `kubectl exec`-style pod shell over the apiserver.
+// Wire protocol (binary vs text disambiguates the two channels in BOTH directions):
+//   browser -> server : binary frame = raw stdin keystrokes; text frame = JSON control
+//                       ({type:'resize',cols,rows})
+//   server -> browser : binary frame = raw stdout/stderr bytes; text frame = JSON status
+//                       ({type:'ready'|'error'|'exit', ...})
+async function handleExec(ws, req) {
+  const url = new URL(req.url, 'http://localhost')
+  const namespace = url.searchParams.get('namespace') || 'default'
+  const pod       = url.searchParams.get('pod')
+  const container = url.searchParams.get('container') || undefined
+  const shell     = url.searchParams.get('shell') || '/bin/sh'
+  const send = (obj) => { if (ws.readyState === 1) ws.send(JSON.stringify(obj)) }
+
+  if (latest.demoMode) { send({ type: 'error', message: 'Exec is not available in demo mode.' }); ws.close(); return }
+  if (!pod)            { send({ type: 'error', message: 'Missing pod.' }); ws.close(); return }
+
+  let exec
+  try { exec = await getExec() } catch (e) { send({ type: 'error', message: e.message }); ws.close(); return }
+  if (!exec) { send({ type: 'error', message: 'No live cluster connection.' }); ws.close(); return }
+
+  // stdin: browser keystrokes flow in here -> apiserver.
+  const stdin = new PassThrough()
+  // stdout/stderr -> browser. The stream carries rows/columns + emits 'resize' so
+  // client-node's isResizable() detection enables terminal resize over its channel 4.
+  const mkOut = () => new Writable({ write(chunk, _enc, cb) { if (ws.readyState === 1) ws.send(chunk); cb() } })
+  const stdout = mkOut()
+  const stderr = mkOut()
+  stdout.columns = Number(url.searchParams.get('cols')) || 80
+  stdout.rows    = Number(url.searchParams.get('rows')) || 24
+
+  let conn = null, closed = false
+  const cleanup = () => {
+    if (closed) return
+    closed = true
+    try { stdin.end() } catch { /* noop */ }
+    try { conn?.close() } catch { /* noop */ }
+    if (ws.readyState === 1) ws.close()
+  }
+
+  ws.on('message', (data, isBinary) => {
+    if (isBinary) { stdin.write(data); return }
+    try {
+      const msg = JSON.parse(data.toString())
+      if (msg.type === 'resize' && msg.cols && msg.rows) {
+        stdout.columns = msg.cols; stdout.rows = msg.rows; stdout.emit('resize')
+      }
+    } catch { /* ignore malformed control frame */ }
+  })
+  ws.on('close', cleanup)
+  ws.on('error', cleanup)
+
+  try {
+    conn = await exec.exec(namespace, pod, container, [shell], stdout, stderr, stdin, true, (status) => {
+      send({ type: 'exit', status: status.status, message: status.message })
+      cleanup()
+    })
+    conn.on('close', cleanup)
+    conn.on('error', (err) => { send({ type: 'error', message: err.message }); cleanup() })
+    send({ type: 'ready' })
+  } catch (err) {
+    send({ type: 'error', message: err.message })
+    cleanup()
+  }
+}
+
+// Shells probed (best-first) so the UI offers only the ones that actually exist in the
+// container (#81). Each is run as `<shell> -c 'exit 0'`: the apiserver execs the binary
+// directly (no pre-existing shell needed), and a missing binary comes back as a Failure
+// status - so this works on distroless/scratch images too (they simply return none).
+const SHELL_CANDIDATES = ['/bin/bash', '/bin/zsh', '/bin/ash', '/bin/sh', '/bin/dash', '/busybox/sh']
+
+function probeShell(exec, namespace, pod, container, shell) {
+  return new Promise((resolve) => {
+    let settled = false
+    const done = (ok) => { if (!settled) { settled = true; resolve(ok) } }
+    const sink = new Writable({ write(_c, _e, cb) { cb() } })
+    exec.exec(namespace, pod, container, [shell, '-c', 'exit 0'], sink, sink, null, false,
+      (status) => done(status.status === 'Success'))
+      .then((conn) => {
+        conn.on('error', () => done(false))
+        setTimeout(() => { try { conn.close() } catch { /* noop */ } done(false) }, 5000)
+      })
+      .catch(() => done(false))
+  })
+}
+
+// GET /api/exec/shells/:namespace/:pod?container= -> { shells: [...], demo?, error? }
+app.get('/api/exec/shells/:namespace/:pod', async (req, res) => {
+  const { namespace, pod } = req.params
+  const container = req.query.container || undefined
+  if (latest.demoMode) return res.json({ shells: [], demo: true })
+  let exec
+  try { exec = await getExec() } catch { exec = null }
+  if (!exec) return res.json({ shells: [], error: 'No live cluster connection.' })
+  try {
+    const results = await Promise.all(SHELL_CANDIDATES.map(sh =>
+      probeShell(exec, namespace, pod, container, sh).then(ok => ok ? sh : null)))
+    res.json({ shells: results.filter(Boolean) })
+  } catch (err) {
+    res.json({ shells: [], error: err.message })
+  }
 })
 
 app.get('/api/health', (_, res) => res.json({ ok: true, demoMode: latest.demoMode }))
@@ -226,7 +333,7 @@ app.get('/api/yaml/:resource/:namespace/:name', async (req, res) => {
 app.get('/api/json/:resource/:namespace/:name', async (req, res) => {
   const { resource, namespace, name } = req.params
   if (latest.demoMode) {
-    // Demo mode has no kubectl — derive JSON from the same mock YAML so the JSON
+    // Demo mode has no kubectl - derive JSON from the same mock YAML so the JSON
     // view mirrors the YAML view instead of returning an empty {}.
     try {
       const obj = yaml.load(getMockYaml(resource, name, namespace)) || {}
@@ -442,9 +549,9 @@ app.get('/api/crd/:group/:version/:plural', async (req, res) => {
   res.json({ items })
 })
 
-// SPA fallback — serve index.html for any non-API route.
+// SPA fallback - serve index.html for any non-API route.
 // /ws is the WebSocket endpoint: a real upgrade is handled before Express, but if a
-// proxy strips the Upgrade header the request lands here — return 426 instead of HTML
+// proxy strips the Upgrade header the request lands here - return 426 instead of HTML
 // so it fails cleanly (the client then relies on its HTTP polling fallback).
 if (existsSync(distDir)) {
   app.get('*', (req, res) => {

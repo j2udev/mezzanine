@@ -46,7 +46,7 @@ export function computePositions(items, layout) {
   const groups = groupByNamespace(items)
 
   if (groups.length <= 1) {
-    // Single namespace — no zone offset, use standard layout
+    // Single namespace - no zone offset, use standard layout
     return singleNsLayout(items, layout, 0)
   }
 
@@ -226,7 +226,7 @@ export function computeHubs(items, positions) {
   })
 }
 
-// Namespace label positions — centroid + elevated Y
+// Namespace label positions - centroid + elevated Y
 export function computeNamespaceCentroids(items, positions) {
   const ns = {}
   items.forEach((item, i) => {
@@ -244,7 +244,7 @@ export function computeNamespaceCentroids(items, positions) {
   }))
 }
 
-// Zone floor bounds for each namespace — used to draw boundary rectangles
+// Zone floor bounds for each namespace - used to draw boundary rectangles
 export function computeZoneBounds(items, positions) {
   const ns = {}
   items.forEach((item, i) => {

@@ -8,7 +8,7 @@ import { yaml } from '@codemirror/lang-yaml'
 import { json } from '@codemirror/lang-json'
 import { vim, Vim, getCM } from '@replit/codemirror-vim'
 
-// kHUD dark theme for the editor — cyan-on-navy to match the rest of the modal.
+// kHUD dark theme for the editor - cyan-on-navy to match the rest of the modal.
 const khudTheme = EditorView.theme({
   '&': { color: 'var(--mz-text)', backgroundColor: 'transparent', height: '100%', fontSize: '12px' },
   '.cm-content': { fontFamily: "'Courier New', monospace", caretColor: 'var(--mz-accent)', padding: '8px 0' },
@@ -52,7 +52,7 @@ function registerVimCommands() {
   Vim.defineEx('wq', 'wq', () => handlers.onSaveClose?.())
   Vim.defineEx('xit', 'x', () => handlers.onSaveClose?.())
   Vim.defineEx('quit', 'q', () => handlers.onQuit?.())
-  // :q! — vim passes bang via params; treat any quit variant the same here.
+  // :q! - vim passes bang via params; treat any quit variant the same here.
   Vim.defineAction('khudHelp', () => handlers.onHelp?.())
   Vim.mapCommand('?', 'action', 'khudHelp', {}, { context: 'normal' })
   Vim.mapCommand('?', 'action', 'khudHelp', {}, { context: 'visual' })

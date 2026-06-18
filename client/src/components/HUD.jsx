@@ -4,6 +4,7 @@ import { useStore, RESOURCE_ALIASES } from '../store'
 import { DetailPanel } from './DetailPanel'
 import { ActionModal } from './ActionModal'
 import { PortForwardModal } from './PortForwardModal'
+import { ExecModal } from './ExecModal'
 import { HelpModal } from './HelpModal'
 import { ActionMenu } from './ActionMenu'
 
@@ -18,8 +19,25 @@ const ALIASES_FOR = (() => {
   for (const [alias, canon] of Object.entries(RESOURCE_ALIASES)) (m[canon] ||= [canon]).push(alias)
   return m
 })()
-const aliasMatch = (opt, stem) => !stem || (ALIASES_FOR[opt] || [opt]).some(a => a.includes(stem))
-const aliasPrefix = (opt, stem) => (ALIASES_FOR[opt] || [opt]).some(a => a.startsWith(stem))
+// Rank score for an option against the typed stem: [tier, length]. Lower sorts first.
+// tier 0 = an alias equals the stem (exact), 1 = an alias starts with it (prefix),
+// 2 = an alias merely contains it (substring), Infinity tier = no match. `length` is the
+// shortest matching alias, so the most-direct/sane completion wins (":po" → "pods", not
+// "pdb" via "poddisruptionbudget"). #77
+const aliasScore = (opt, stem) => {
+  const aliases = ALIASES_FOR[opt] || [opt]
+  if (!stem) return [1, Math.min(...aliases.map(a => a.length))]
+  let prefix = Infinity, sub = Infinity
+  for (const a of aliases) {
+    if (a === stem) return [0, a.length]
+    if (a.startsWith(stem)) prefix = Math.min(prefix, a.length)
+    else if (a.includes(stem)) sub = Math.min(sub, a.length)
+  }
+  if (prefix !== Infinity) return [1, prefix]
+  if (sub !== Infinity)    return [2, sub]
+  return [Infinity, Infinity]
+}
+const aliasMatch = (opt, stem) => aliasScore(opt, stem)[0] !== Infinity
 
 function Kbd({ children }) {
   return (
@@ -71,8 +89,7 @@ export function HUD({ panelWidth = 288 }) {
   const clearFilter         = useStore(s => s.clearFilter)
   const setCommand          = useStore(s => s.setCommand)
   const submitCommand       = useStore(s => s.submitCommand)
-  const navBack             = useStore(s => s.navBack)
-  const navForwardStep      = useStore(s => s.navForwardStep)
+  const navGo               = useStore(s => s.navGo)
 
   const filterRef  = useRef()
   // Resource-mode Tab-autocomplete: stem = what the user typed before the first Tab, idx =
@@ -115,8 +132,9 @@ export function HUD({ panelWidth = 288 }) {
   const rankCandidates = (stem) => COMMAND_OPTIONS
     .filter(n => aliasMatch(n, stem))
     .sort((a, b) => {
-      const as = aliasPrefix(a, stem), bs = aliasPrefix(b, stem)
-      if (as !== bs) return as ? -1 : 1
+      const [at, al] = aliasScore(a, stem), [bt, bl] = aliasScore(b, stem)
+      if (at !== bt) return at - bt        // exact → prefix → substring
+      if (al !== bl) return al - bl        // shortest matching alias first
       return a.localeCompare(b)
     })
   const resCandidates = useMemo(() => rankCandidates(command.trim().toLowerCase()), [command])
@@ -145,6 +163,8 @@ export function HUD({ panelWidth = 288 }) {
   }
 
   const showBreadcrumb = navStack.length > 0 || !!drilldownLabel
+  // A history frame's label = its drilldown leaf (last "›" segment) or its plain resource name.
+  const crumbLabel = (f) => f.drilldownLabel ? f.drilldownLabel.split('›').pop().trim() : f.resource
 
   // The grouping toggle only matters for namespaced resources viewed across all namespaces.
   const namespacedView = activeNamespace === 'all' && !nsPickerMode && allItems.some(i => i.namespace)
@@ -165,7 +185,7 @@ export function HUD({ panelWidth = 288 }) {
           mezza9
         </span>
 
-        {/* Demo-mode badge (no live cluster — the NotConnected screen covers "disconnected") */}
+        {/* Demo-mode badge (no live cluster - the NotConnected screen covers "disconnected") */}
         {demoMode && (
           <span style={{ fontSize: 10, letterSpacing: '0.08em', color: 'rgba(var(--mz-warn-rgb), 0.67)', flexShrink: 0 }}>DEMO</span>
         )}
@@ -193,80 +213,31 @@ export function HUD({ panelWidth = 288 }) {
           </span>
         )}
 
-        {/* Center slot — breadcrumb OR resource indicator, absolutely centered in the
-            header (#73) so it reads as "what am I looking at" instead of being pinned
-            next to the wordmark. */}
+        {/* Center slot - the current (filtered) resource the list is showing, absolutely
+            centered (#73). Always shown: the history/breadcrumb trail lives in the FOOTER
+            now (kept separate from "what am I looking at" per user request), so this stays
+            stable regardless of nav depth. `resourceLabel` already resolves to the active
+            drilldown's leaf, so a drilled-in view names that resource here. */}
         <div style={{
           position: 'absolute', left: '50%', top: 0, height: 44, transform: 'translateX(-50%)',
           display: 'flex', alignItems: 'center', maxWidth: '40%', pointerEvents: 'none',
         }}>
-        <div style={{ display: 'flex', alignItems: 'center', minWidth: 0, pointerEvents: 'auto' }}>
-        {/* Breadcrumb trail */}
-        {showBreadcrumb && (
-          <div style={{
-            display: 'flex', alignItems: 'center', gap: 0, flexShrink: 0, minWidth: 0,
-            background: 'rgba(var(--mz-accent-rgb),0.04)', border: '1px solid rgba(var(--mz-accent-rgb),0.1)',
-            borderRadius: 4, padding: '2px 6px', fontSize: 10,
-          }}>
-            {navStack.length > 0 && (
-              <span
-                onClick={navBack}
-                title="[ back"
-                style={{ color: 'var(--mz-accent-2)', cursor: 'pointer', whiteSpace: 'nowrap', paddingRight: 4 }}
-                onMouseEnter={e => e.currentTarget.style.color = 'var(--mz-accent-2)'}
-                onMouseLeave={e => e.currentTarget.style.color = 'var(--mz-accent-2)'}
-              >
-                {navStack.length > 1 && <span style={{ color: 'var(--mz-text-faint)', marginRight: 4 }}>···</span>}
-                {navStack[navStack.length - 1].drilldownLabel
-                  ? navStack[navStack.length - 1].drilldownLabel.split('›').pop().trim()
-                  : navStack[navStack.length - 1].resource}
-              </span>
-            )}
-            {navStack.length > 0 && (
-              <span style={{ color: 'var(--mz-text-faint)', padding: '0 4px' }}>›</span>
-            )}
-            <span style={{ color: 'var(--mz-text)', whiteSpace: 'nowrap', fontWeight: 500 }}>
-              {drilldownLabel || activeResource}
-            </span>
-            {navFuture.length > 0 && (
-              <>
-                <span style={{ color: 'var(--mz-text-faint)', padding: '0 4px' }}>›</span>
-                <span
-                  onClick={navForwardStep}
-                  title="] forward"
-                  style={{ color: 'var(--mz-accent-2)', cursor: 'pointer', whiteSpace: 'nowrap' }}
-                  onMouseEnter={e => e.currentTarget.style.color = 'var(--mz-accent-2)'}
-                  onMouseLeave={e => e.currentTarget.style.color = 'var(--mz-accent-2)'}
-                >
-                  {navFuture[0].drilldownLabel
-                    ? navFuture[0].drilldownLabel.split('›').pop().trim()
-                    : navFuture[0].resource}
-                </span>
-              </>
-            )}
-          </div>
-        )}
-
-        {/* Current resource indicator — front-and-center "what am I looking at" */}
-        {!showBreadcrumb && (
-          <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, flexShrink: 0, minWidth: 0 }}>
+          <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, minWidth: 0 }}>
             <span style={{
               fontSize: 15, fontWeight: 600, color: 'var(--mz-text-bright)', letterSpacing: '0.02em',
-              textTransform: 'capitalize', whiteSpace: 'nowrap',
+              textTransform: 'capitalize', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
             }}>
               {resourceLabel}
             </span>
-            <span style={{ fontSize: 11, color: 'var(--mz-accent-2)', whiteSpace: 'nowrap' }}>
+            <span style={{ fontSize: 11, color: 'var(--mz-accent-2)', whiteSpace: 'nowrap', flexShrink: 0 }}>
               {filter ? `${filteredCount}/${totalCount}` : totalCount}
             </span>
           </div>
-        )}
-        </div>
         </div>
 
         <div style={{ flex: 1 }} />
 
-        {/* Search box — top-right. `/` = string filter, `:` = resource picker (#68, #70).
+        {/* Search box - top-right. `/` = string filter, `:` = resource picker (#68, #70).
             A mode toggle lets mouse users switch without shortcuts; resource mode adds a
             dropdown of all resources with autocomplete. */}
         {(() => {
@@ -402,6 +373,9 @@ export function HUD({ panelWidth = 288 }) {
       {/* ── Port-forward modal ───────────────────────────────────── */}
       <PortForwardModal />
 
+      {/* ── Shell terminal (#81) ─────────────────────────────────── */}
+      <ExecModal />
+
       {/* ── Help modal ───────────────────────────────────────────── */}
       <HelpModal />
 
@@ -418,8 +392,8 @@ export function HUD({ panelWidth = 288 }) {
         }}
       >
         {(
-          <div style={{ display: 'flex', alignItems: 'center', gap: 12, flex: 1, flexWrap: 'wrap' }}>
-            {/* Bare-minimum shortcut hints (#72) — everything else lives in the ? help modal */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexShrink: 0 }}>
+            {/* Bare-minimum shortcut hints (#72) - everything else lives in the ? help modal */}
             <Hint keys={['j', 'k']} label="select" />
             <Hint keys={[':']} label="resource" />
             <Hint keys={['/']} label="filter" />
@@ -450,6 +424,53 @@ export function HUD({ panelWidth = 288 }) {
             )}
           </div>
         )}
+
+        {/* History / breadcrumb trail - takes the whole middle of the FOOTER (flex:1) so the
+            FULL stack is visible, not just the immediate prev/next. Each crumb is clickable and
+            jumps straight to its point in history via navGo(delta). Kept distinct from the
+            header's "current resource" indicator (per user request). Scrolls horizontally if
+            the trail outgrows the available width. */}
+        <div style={{ flex: 1, minWidth: 0, display: 'flex', justifyContent: 'center' }}>
+          {showBreadcrumb && (
+            <div style={{
+              display: 'flex', alignItems: 'center', minWidth: 0, maxWidth: '100%',
+              background: 'rgba(var(--mz-accent-rgb),0.04)', border: '1px solid rgba(var(--mz-accent-rgb),0.1)',
+              borderRadius: 4, padding: '2px 8px', fontSize: 10, whiteSpace: 'nowrap',
+              overflowX: 'auto', overflowY: 'hidden',
+            }}>
+              {/* Past frames (oldest → newest), each jumps back to that depth */}
+              {navStack.map((f, i) => (
+                <span key={`b${i}`} style={{ display: 'inline-flex', alignItems: 'center', flexShrink: 0 }}>
+                  <span
+                    onClick={() => navGo(-(navStack.length - i))}
+                    title="back"
+                    style={{ color: 'var(--mz-accent-2)', cursor: 'pointer', whiteSpace: 'nowrap' }}
+                  >
+                    {crumbLabel(f)}
+                  </span>
+                  <span style={{ color: 'var(--mz-text-faint)', padding: '0 4px' }}>›</span>
+                </span>
+              ))}
+              {/* Current view (not clickable) */}
+              <span style={{ color: 'var(--mz-text)', whiteSpace: 'nowrap', fontWeight: 500, flexShrink: 0 }}>
+                {drilldownLabel || activeResource}
+              </span>
+              {/* Future frames (forward history), each jumps forward to that depth */}
+              {navFuture.map((f, j) => (
+                <span key={`f${j}`} style={{ display: 'inline-flex', alignItems: 'center', flexShrink: 0 }}>
+                  <span style={{ color: 'var(--mz-text-faint)', padding: '0 4px' }}>›</span>
+                  <span
+                    onClick={() => navGo(j + 1)}
+                    title="forward"
+                    style={{ color: 'var(--mz-accent-2)', cursor: 'pointer', whiteSpace: 'nowrap', opacity: 0.7 }}
+                  >
+                    {crumbLabel(f)}
+                  </span>
+                </span>
+              ))}
+            </div>
+          )}
+        </div>
 
         <div style={{ fontSize: 10, flexShrink: 0, color: 'var(--mz-text-dim)', fontFamily: 'inherit' }}>
           {filteredCount}&nbsp;<span style={{ color: 'var(--mz-text-faint)' }}>/</span>&nbsp;{totalCount}&nbsp;{resourceLabel}

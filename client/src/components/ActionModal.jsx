@@ -42,7 +42,7 @@ function transformSecretDataSection(yaml, decode) {
   }).join('\n')
 }
 
-// JSON sibling of transformSecretDataSection — transform the string values inside the
+// JSON sibling of transformSecretDataSection - transform the string values inside the
 // flat `"data": { … }` object in `kubectl get -o json` output, preserving formatting.
 function transformSecretJsonData(json, decode) {
   let inData = false
@@ -308,7 +308,12 @@ export function ActionModal() {
     if (viewFormat === 'json') return transformSecretJsonData(rawViewContent, true)
     return rawViewContent
   }, [rawViewContent, secretDecoded, modal?.resource, isInspect, viewFormat])
-  const contentLines     = useMemo(() => displayContent ? displayContent.split('\n') : [], [displayContent])
+  // In the helm-history values peek, search/match plumbing runs over the peeked revision's
+  // values rather than the (unused) main content, so the peek gets the same / filter (#76).
+  const contentLines     = useMemo(() => {
+    if (modal?.type === 'helm-history' && historyValues) return (historyValues.content || '').split('\n')
+    return displayContent ? displayContent.split('\n') : []
+  }, [displayContent, modal?.type, historyValues])
   // Read-view search (describe/yaml/json + logs). Edit-mode search is owned by CodeMirror.
   const searchMatchLineIndices = useMemo(() => {
     const activeSearch = modal?.type === 'logs' ? logFilter : search
@@ -338,13 +343,16 @@ export function ActionModal() {
     setLoading(true); setFetchError(null)
     try {
       let url
+      // A 'containers' drilldown row tails one container of its pod: pod = item.pod, container = item.name (#80).
+      const isContainer = modal.resource === 'containers'
       if (isMulti && logPodFilter === 'all') {
         url = `/api/logs-multi/${modal.resource}/${modal.item.namespace}/${modal.item.name}`
           + `?tail=${logTail}${logSince !== '0' ? `&sinceSeconds=${logSince}` : ''}`
       } else {
-        const podName = (isMulti && logPodFilter !== 'all') ? logPodFilter : modal.item.name
+        const podName   = isContainer ? modal.item.pod : ((isMulti && logPodFilter !== 'all') ? logPodFilter : modal.item.name)
+        const container = isContainer ? modal.item.name : logContainer
         url = `/api/logs/${modal.item.namespace}/${podName}`
-          + `?tail=${logTail}${logSince !== '0' ? `&sinceSeconds=${logSince}` : ''}${logContainer ? `&container=${logContainer}` : ''}`
+          + `?tail=${logTail}${logSince !== '0' ? `&sinceSeconds=${logSince}` : ''}${container ? `&container=${container}` : ''}`
       }
       const res  = await fetch(url)
       const data = await res.json()
@@ -510,7 +518,7 @@ export function ActionModal() {
   // Reset matchIndex when search/filter changes
   useEffect(() => { setMatchIndex(0) }, [logFilter, search])
 
-  // Scroll to current match (describe/yaml). Only while a search is active — otherwise
+  // Scroll to current match (describe/yaml). Only while a search is active - otherwise
   // clearing the filter would fire with stale match refs and snap the view to the top.
   // With this guard the scroll position stays on the last match the user jumped to (#47).
   useEffect(() => {
@@ -567,7 +575,7 @@ export function ActionModal() {
       // '/' search, '?' help). Yield entirely so nothing here intercepts first.
       if (editMode) return
 
-      // Focused inputs (header search, log grep, control selects) own their own keys —
+      // Focused inputs (header search, log grep, control selects) own their own keys -
       // including Esc (they clear+blur themselves). Don't intercept here.
       if (inInput) return
 
@@ -622,7 +630,7 @@ export function ActionModal() {
       if (modal.type === 'helm-history' && !historyValues && helmHistory.length > 0) {
         if (e.key === 'j' || e.key === 'ArrowDown') { e.preventDefault(); e.stopPropagation(); setHistoryIdx(i => Math.min(i + 1, helmHistory.length - 1)); return }
         if (e.key === 'k' || e.key === 'ArrowUp')   { e.preventDefault(); e.stopPropagation(); setHistoryIdx(i => Math.max(i - 1, 0)); return }
-        if (e.key === 'v') { e.preventDefault(); e.stopPropagation(); const row = helmHistory[historyIdx]; if (row) fetchRevisionValues(row.revision, false); return }
+        if (e.key === 'v') { e.preventDefault(); e.stopPropagation(); const row = helmHistory[historyIdx]; if (row) { setSearch(''); setMatchIndex(0); fetchRevisionValues(row.revision, false) } return }
       }
       // Helm revision-values peek: Tab toggles USER / ALL (computed) values.
       if (modal.type === 'helm-history' && historyValues && e.key === 'Tab') {
@@ -828,9 +836,10 @@ export function ActionModal() {
             )}
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-            {/* Search box — top-right, `/` focuses (#68). Read views only: logs has its own
-                grep control, edit-mode search is owned by CodeMirror, history is a table. */}
-            {type !== 'logs' && !editMode && type !== 'helm-history' && (
+            {/* Search box - top-right, `/` focuses (#68). Read views only: logs has its own
+                grep control, edit-mode search is owned by CodeMirror, the history *table* has
+                none but its values *peek* does (#76). */}
+            {type !== 'logs' && !editMode && !helmHistoryTable && (
               <div style={{
                 display: 'flex', alignItems: 'center', gap: 5, padding: '2px 8px', borderRadius: 4,
                 background: search ? 'rgba(var(--mz-warn-2-rgb),0.1)' : 'rgba(255,255,255,0.04)',
@@ -967,7 +976,7 @@ export function ActionModal() {
                 )
               })()}
 
-              {/* DESCRIBE / YAML / JSON — unified read view */}
+              {/* DESCRIBE / YAML / JSON - unified read view */}
               {isInspect && !editMode && (
                 <ContentLines
                   lines={contentLines}
@@ -999,7 +1008,7 @@ export function ActionModal() {
                 </div>
               )}
 
-              {/* HELM VALUES / MANIFEST — YAML viewer (line numbers + search via ContentLines) */}
+              {/* HELM VALUES / MANIFEST - YAML viewer (line numbers + search via ContentLines) */}
               {(type === 'helm-values' || type === 'helm-manifest') && (
                 <ContentLines
                   lines={contentLines}
@@ -1013,7 +1022,7 @@ export function ActionModal() {
                 />
               )}
 
-              {/* HELM NOTES — describe-style viewer */}
+              {/* HELM NOTES - describe-style viewer */}
               {type === 'helm-notes' && (
                 <ContentLines
                   lines={contentLines}
@@ -1027,11 +1036,11 @@ export function ActionModal() {
                 />
               )}
 
-              {/* HELM HISTORY — revision values peek */}
+              {/* HELM HISTORY - revision values peek */}
               {type === 'helm-history' && historyValues && (
                 <div>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
-                    <button onClick={() => setHistoryValues(null)} style={{
+                    <button onClick={() => { setHistoryValues(null); setSearch(''); setMatchIndex(0) }} style={{
                       fontSize: 10, padding: '2px 10px', borderRadius: 3, cursor: 'pointer',
                       color: 'var(--mz-orange)', background: 'rgba(var(--mz-orange-rgb),0.08)', border: '1px solid rgba(var(--mz-orange-rgb),0.3)',
                       fontFamily: 'inherit',
@@ -1054,14 +1063,14 @@ export function ActionModal() {
                   {historyValuesBusy
                     ? <div style={{ fontSize: 11, color: 'var(--mz-orange)', opacity: 0.7 }}>Loading values…</div>
                     : <ContentLines
-                        lines={(historyValues.content || '').split('\n')}
-                        kind="yaml" search={null} lineToMatchIdx={{}} matchIndex={-1}
+                        lines={contentLines}
+                        kind="yaml" search={search || null} lineToMatchIdx={lineToMatchIdx} matchIndex={matchIndex}
                         showLineNumbers={showLineNumbers} matchRefs={matchRefs}
                         emptyLabel="No user-supplied values for this revision." />}
                 </div>
               )}
 
-              {/* HELM HISTORY — table with rollback */}
+              {/* HELM HISTORY - table with rollback */}
               {type === 'helm-history' && !historyValues && (
                 <div>
                   {helmHistory.length === 0 && !loading && (
@@ -1205,16 +1214,16 @@ export function ActionModal() {
                 fontFamily: 'inherit', transition: 'all 0.2s',
               }}>{copyFlash ? '✓ Copied' : 'Copy'} <span style={{ opacity: 0.5, fontSize: 9 }}>c</span></button>
             )}
-            {/* Edit apply result — success is terse here; errors render in the banner above. */}
+            {/* Edit apply result - success is terse here; errors render in the banner above. */}
             {editMode && editResult?.ok && (
               <span style={{ fontSize: 10, color: 'var(--mz-ok)' }}>
                 ✓ {editResult.output || 'Applied'}
               </span>
             )}
             {editMode && editResult && !editResult.ok && (
-              <span style={{ fontSize: 10, color: 'var(--mz-danger-2)' }}>✗ apply failed — see details ↑</span>
+              <span style={{ fontSize: 10, color: 'var(--mz-danger-2)' }}>✗ apply failed - see details ↑</span>
             )}
-            {/* Key hints — edit-mode vim keys live in the ? overlay (CodeMirror owns them) */}
+            {/* Key hints - edit-mode vim keys live in the ? overlay (CodeMirror owns them) */}
             <span style={{ display: 'flex', alignItems: 'center', gap: 8, marginLeft: 4 }}>
               {helmHistoryTable && <VimHint k="j/k" label="select" />}
               {helmHistoryTable && <VimHint k="v" label="values" />}

@@ -9,7 +9,7 @@ export function LoadingScreen() {
 
   const hasData = pods.length > 0 || deployments.length > 0
 
-  // Clear as soon as data arrives — no artificial delay needed (no WebGL init in list mode)
+  // Clear as soon as data arrives - no artificial delay needed (no WebGL init in list mode)
   useEffect(() => {
     if (hasData) setReady(true)
   }, [hasData])

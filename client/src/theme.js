@@ -1,11 +1,11 @@
 // ── Theme system (#14) ───────────────────────────────────────────────────────
 // One source of truth for every color in the app. Each theme is a flat map of
 // SEMANTIC tokens. Two consumers:
-//   1. CSS custom properties — applyTheme() writes every token to :root as
+//   1. CSS custom properties - applyTheme() writes every token to :root as
 //      `--mz-<token>` (and RGB triplets as `--mz-<token>-rgb` for rgba() glows).
 //      The bulk of the UI uses inline `var(--mz-…)`, so a theme switch repaints
 //      with no React re-render.
-//   2. JS — statusColor()/getNsColor() (constants.js) need real hex strings for
+//   2. JS - statusColor()/getNsColor() (constants.js) need real hex strings for
 //      `${color}<alpha>` math, so they read the live ACTIVE palette object here.
 //
 // To add a theme: add an entry to THEMES. To add a token: add it to every theme
@@ -22,7 +22,7 @@ export const THEMES = {
   mezzanine: {
     id: 'mezzanine',
     name: 'Mezzanine Neon',
-    blurb: 'The original — neon cyan on near-black.',
+    blurb: 'The original - neon cyan on near-black.',
     swatch: ['#00d4ff', '#aa55ff', '#00ffaa'],
     tokens: {
       bg:          '#0a1220',

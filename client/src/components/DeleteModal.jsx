@@ -114,7 +114,7 @@ export function DeleteModal() {
             )}
             {demoMode && (
               <p style={{ fontSize: 11, color: 'var(--mz-warn-2)', margin: '0 0 16px' }}>
-                Demo mode — deletion is simulated and has no effect.
+                Demo mode - deletion is simulated and has no effect.
               </p>
             )}
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 10 }}>

@@ -159,7 +159,7 @@ export function PortForwardModal() {
           </div>
         )}
         {error && <div style={{ padding: '0 16px 8px', fontSize: 10, color: 'var(--mz-danger-2)' }}>{error}</div>}
-        {demoMode && <div style={{ padding: '0 16px 8px', fontSize: 10, color: 'rgba(var(--mz-warn-rgb), 0.6)' }}>demo mode — forwards are simulated</div>}
+        {demoMode && <div style={{ padding: '0 16px 8px', fontSize: 10, color: 'rgba(var(--mz-warn-rgb), 0.6)' }}>demo mode - forwards are simulated</div>}
 
         {/* Active forwards */}
         <div style={{ borderTop: `1px solid ${alpha(ACCENT, 7)}`, overflowY: 'auto', flex: 1 }}>

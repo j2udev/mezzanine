@@ -1,0 +1,24 @@
+# Build context trimming — keep the image lean and the context small.
+# We copy src/, client/dist, and package*.json; everything else is excluded.
+node_modules
+client/node_modules
+client/src
+client/public
+client/index.html
+client/vite.config.js
+client/package*.json
+.git
+.gitignore
+.devbox
+.devcontainer
+.vscode
+.claude
+.playwright-mcp
+scripts
+*.png
+*.log
+todo.md
+CLAUDE.md
+start.sh
+Dockerfile
+.dockerignore

@@ -4,7 +4,7 @@ import { FORWARDABLE, OWNED } from './store'
 // Single source of truth for every per-object action. To add a new action, add one
 // entry here: it automatically appears in the detail panel, the actions palette (a),
 // and (if it defines `key`) as a keyboard shortcut handled by useKeys. Nothing else
-// needs to change — this is the pattern future object interactions conform to.
+// needs to change - this is the pattern future object interactions conform to.
 //
 // Fields:
 //   id     unique string
@@ -12,12 +12,13 @@ import { FORWARDABLE, OWNED } from './store'
 //   hint   key shown in the UI (display only)
 //   color  accent color
 //   group  palette section
-//   danger destructive — kept out of the always-visible panel buttons
+//   danger destructive - kept out of the always-visible panel buttons
 //   when   (resource) => bool : is this action applicable to the active resource?
 //   key    (event)    => bool : does this keydown trigger the action? (optional)
 //   run    (store)    => void : perform the action (store = useStore.getState())
 
-const LOGS = new Set(['pods', 'deployments', 'statefulsets', 'daemonsets', 'services', 'jobs'])
+// 'containers' = the synthetic pod-drilldown rows; `l` on one tails that single container (#80).
+const LOGS = new Set(['pods', 'deployments', 'statefulsets', 'daemonsets', 'services', 'jobs', 'containers'])
 // "Standard" workloads/config that support yaml/edit/describe/delete (not helm, container
 // drilldown rows, or raw custom-resource lists).
 const isStd = (r) => r !== 'helmreleases' && r !== 'containers' && r !== 'portforwards' && !r.startsWith('cr:')
@@ -47,6 +48,10 @@ export const OBJECT_ACTIONS = [
     when: r => r === 'helmreleases', key: e => e.key === 'h', run: s => s.openModal('helm-history') },
 
   // ── Actions / Navigate ───────────────────────────────────
+  // Shell into a pod (or a single container from the pod drilldown) - k9s-style `s` (#81).
+  { id: 'shell', label: 'Shell', hint: 's', color: 'var(--mz-accent-2)', group: 'Actions',
+    when: r => r === 'pods' || r === 'containers',
+    key: e => e.key === 's' && !e.ctrlKey && !e.metaKey && !e.altKey, run: s => s.openExec() },
   { id: 'forward', label: 'Port-forward', hint: '⇧f', color: 'var(--mz-orange)', group: 'Actions',
     when: r => FORWARDABLE.has(r), key: e => e.key === 'F', run: s => s.openPortForward() },
   { id: 'owner', label: 'Jump to owner', hint: '⇧j', color: 'var(--mz-accent-2)', group: 'Navigate',

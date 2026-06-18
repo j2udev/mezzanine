@@ -32,7 +32,7 @@
   --mz-neutral: #667788;     --mz-neutral-rgb: 102,119,136;
 }
 
-/* Mezzanine wordmark — self-hosted neon cursive (no runtime CDN dependency) */
+/* Mezzanine wordmark - self-hosted neon cursive (no runtime CDN dependency) */
 @font-face {
   font-family: 'Mezz Script';
   font-style: normal;
