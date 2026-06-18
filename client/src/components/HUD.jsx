@@ -38,6 +38,20 @@ const aliasScore = (aliases, stem) => {
   return [Infinity, Infinity]
 }
 
+// Eye / eye-off icon for the history show-hide toggle (#22). Inline SVG instead of an emoji
+// so it renders crisply in the monospace UI (emoji glyphs show as tofu in our font stack).
+function EyeIcon({ off = false }) {
+  return (
+    <svg width="13" height="13" viewBox="0 0 24 24" fill="none"
+      stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"
+      style={{ display: 'block', flexShrink: 0 }} aria-hidden="true">
+      <path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7-11-7-11-7z" />
+      <circle cx="12" cy="12" r="3" />
+      {off && <line x1="3" y1="3" x2="21" y2="21" />}
+    </svg>
+  )
+}
+
 function Kbd({ children }) {
   return (
     <span style={{
@@ -82,6 +96,9 @@ export function HUD({ panelWidth = 288 }) {
   const toggleGroupByNamespace  = useStore(s => s.toggleGroupByNamespace)
   const panelEnabled            = useStore(s => s.panelEnabled)
   const togglePanel             = useStore(s => s.togglePanel)
+  const historyEnabled          = useStore(s => s.historyEnabled)
+  const toggleHistory           = useStore(s => s.toggleHistory)
+  const clearHistory            = useStore(s => s.clearHistory)
   const sidebarCollapsed        = useStore(s => s.sidebarCollapsed)
   const toggleSidebar           = useStore(s => s.toggleSidebar)
 
@@ -209,7 +226,7 @@ export function HUD({ panelWidth = 288 }) {
     })),
     {
       key: 'cur', label: drilldownLabel || activeResource, title: null, onClick: null,
-      color: 'var(--mz-text)', opacity: 1, weight: 500,
+      color: 'var(--mz-text)', opacity: 1, weight: 500, current: true,
     },
     ...navFuture.map((f, j) => ({
       key: `f${j}`, label: crumbLabel(f), title: 'forward',
@@ -257,19 +274,6 @@ export function HUD({ panelWidth = 288 }) {
           <span style={{ fontSize: 10, letterSpacing: '0.08em', color: 'rgba(var(--mz-warn-rgb), 0.67)', flexShrink: 0 }}>DEMO</span>
         )}
 
-        {/* Namespace pill */}
-        {activeNamespace !== 'all' && !nsPickerMode && (
-          <div style={{
-            display: 'flex', alignItems: 'center', gap: 4, padding: '2px 8px', borderRadius: 4, flexShrink: 0,
-            background: 'rgba(var(--mz-accent-rgb),0.1)', border: '1px solid rgba(var(--mz-accent-rgb),0.3)',
-          }}>
-            <span style={{ fontSize: 10, color: 'var(--mz-accent-2)' }}>ns:</span>
-            <span style={{ fontSize: 11, color: 'var(--mz-accent)', fontFamily: 'inherit' }}>{activeNamespace}</span>
-            <button onClick={() => setActiveNamespace('all')} style={{ fontSize: 12, lineHeight: 1, color: 'var(--mz-text-dim)', marginLeft: 2, background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}
-              onMouseEnter={e => e.target.style.color = 'var(--mz-text)'} onMouseLeave={e => e.target.style.color = 'var(--mz-text-dim)'}>×</button>
-          </div>
-        )}
-
         {/* Namespace picker badge */}
         {nsPickerMode && (
           <span style={{
@@ -281,18 +285,31 @@ export function HUD({ panelWidth = 288 }) {
         )}
 
         {/* Center slot - the current (filtered) resource the list is showing, absolutely
-            centered (#73). Always shown: the history/breadcrumb trail lives in the FOOTER
-            now (kept separate from "what am I looking at" per user request), so this stays
-            stable regardless of nav depth. `resourceLabel` already resolves to the active
-            drilldown's leaf, so a drilled-in view names that resource here. */}
+            centered (#73). The history/breadcrumb trail lives in the FOOTER now, so this
+            stays stable regardless of nav depth. `resourceLabel` already resolves to the
+            active drilldown's leaf, so a drilled-in view names that resource here.
+            Namespace scope (#23/#26): all-namespaces shows nothing extra; when a namespace
+            is filtered it appears UNDER the resource name in a smaller font, separated by a
+            thin neon delimiter line. Vertically centered so the single-line (all-ns) and
+            two-line (filtered) states both sit balanced in the 44px bar. */}
+        {(() => {
+          const nsFiltered = !nsPickerMode && activeNamespace !== 'all'
+          return (
         <div style={{
           position: 'absolute', left: '50%', top: 0, height: 44, transform: 'translateX(-50%)',
-          display: 'flex', alignItems: 'center', maxWidth: '40%', pointerEvents: 'none',
+          display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
+          maxWidth: '48%', pointerEvents: 'none', lineHeight: 1, gap: 3,
         }}>
-          <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, minWidth: 0 }}>
+          {/* Title + the optional namespace sub-line are BOTH in-flow, and the column is
+              justify-center, so the whole stacked unit is centered within the 44px bar - its
+              vertical midpoint lines up with the logo (also centered in the bar). Adding the
+              namespace line grows the stack symmetrically about the center instead of pushing
+              the title up / overflowing the bar. */}
+          <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, minWidth: 0, maxWidth: '100%' }}>
             <span style={{
               fontSize: 15, fontWeight: 600, color: 'var(--mz-text-bright)', letterSpacing: '0.02em',
               textTransform: 'capitalize', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+              lineHeight: 1,
             }}>
               {resourceLabel}
             </span>
@@ -300,7 +317,37 @@ export function HUD({ panelWidth = 288 }) {
               {filter ? `${filteredCount}/${totalCount}` : totalCount}
             </span>
           </div>
+          {/* Filtered-namespace sub-line: a long, thin neon delimiter (bright center, faded
+              edges) above the namespace name. Click-to-clear (pointerEvents on just here). */}
+          {nsFiltered && (
+            <span
+              role="button" tabIndex={0}
+              onClick={() => setActiveNamespace('all')}
+              onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setActiveNamespace('all') } }}
+              title={`Namespace: ${activeNamespace} - click to clear (Esc)`}
+              style={{
+                pointerEvents: 'auto', cursor: 'pointer', display: 'flex', flexDirection: 'column',
+                alignItems: 'center', width: 'max-content', maxWidth: '40vw', gap: 2,
+              }}
+              onMouseEnter={e => { e.currentTarget.querySelector('[data-ns]').style.color = 'var(--mz-text-bright)' }}
+              onMouseLeave={e => { e.currentTarget.querySelector('[data-ns]').style.color = 'var(--mz-accent)' }}
+            >
+              {/* long, thin neon delimiter - 1px tall, bright in the middle, faded at edges */}
+              <span style={{
+                width: 180, maxWidth: '60vw', height: 1,
+                background: 'linear-gradient(90deg, transparent 0%, rgba(var(--mz-accent-rgb),0.15) 20%, var(--mz-accent) 50%, rgba(var(--mz-accent-rgb),0.15) 80%, transparent 100%)',
+                boxShadow: '0 0 4px rgba(var(--mz-accent-rgb),0.7)',
+              }} />
+              <span data-ns style={{
+                fontSize: 10, fontWeight: 500, color: 'var(--mz-accent)', letterSpacing: '0.04em',
+                whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: '100%',
+                lineHeight: 1, transition: 'color 0.15s',
+              }}>{activeNamespace}</span>
+            </span>
+          )}
         </div>
+          )
+        })()}
 
         <div style={{ flex: 1 }} />
 
@@ -424,45 +471,8 @@ export function HUD({ panelWidth = 288 }) {
         </div>
           )
         })()}
-
-        {/* Namespace grouping toggle (flat list ⇄ grouped headers) */}
-        {namespacedView && (
-          <button
-            onClick={toggleGroupByNamespace}
-            title="Toggle namespace grouping (ctrl+g)"
-            style={{
-              display: 'flex', alignItems: 'center', gap: 5, flexShrink: 0, cursor: 'pointer',
-              padding: '2px 8px', borderRadius: 4, fontSize: 10, letterSpacing: '0.04em',
-              fontFamily: 'inherit',
-              color: groupByNamespace ? 'var(--mz-accent)' : 'var(--mz-accent-2)',
-              background: groupByNamespace ? 'rgba(var(--mz-accent-rgb),0.1)' : 'rgba(255,255,255,0.04)',
-              border: `1px solid ${groupByNamespace ? 'rgba(var(--mz-accent-rgb),0.3)' : 'rgba(255,255,255,0.1)'}`,
-            }}
-            onMouseEnter={e => { if (!groupByNamespace) e.currentTarget.style.color = 'var(--mz-accent-2)' }}
-            onMouseLeave={e => { if (!groupByNamespace) e.currentTarget.style.color = 'var(--mz-accent-2)' }}
-          >
-            <span style={{ fontSize: 12, lineHeight: 1 }}>{groupByNamespace ? '⊟' : '≡'}</span>
-            {groupByNamespace ? 'grouped' : 'flat'}
-          </button>
-        )}
-
-        {/* Detail-drawer on/off toggle (#todo3). Off = the right panel never opens, even on
-            selection, giving the list its full width. State persists across reloads. */}
-        <button
-          onClick={togglePanel}
-          title="Toggle detail drawer (ctrl+\\)"
-          style={{
-            display: 'flex', alignItems: 'center', gap: 5, flexShrink: 0, cursor: 'pointer',
-            padding: '2px 8px', borderRadius: 4, fontSize: 10, letterSpacing: '0.04em',
-            fontFamily: 'inherit',
-            color: panelEnabled ? 'var(--mz-accent)' : 'var(--mz-accent-2)',
-            background: panelEnabled ? 'rgba(var(--mz-accent-rgb),0.1)' : 'rgba(255,255,255,0.04)',
-            border: `1px solid ${panelEnabled ? 'rgba(var(--mz-accent-rgb),0.3)' : 'rgba(255,255,255,0.1)'}`,
-          }}
-        >
-          <span style={{ fontSize: 12, lineHeight: 1 }}>{panelEnabled ? '◧' : '▭'}</span>
-          {panelEnabled ? 'drawer' : 'wide'}
-        </button>
+        {/* The detail-drawer on/off toggle now lives in the footer next to the flat/group
+            toggle (#25), keeping all list-scoping/layout toggles in one cluster. */}
       </div>
 
       {/* ── Detail panel ─────────────────────────────────────────── */}
@@ -483,7 +493,11 @@ export function HUD({ panelWidth = 288 }) {
       {/* ── Actions palette ──────────────────────────────────────── */}
       <ActionMenu />
 
-      {/* ── Bottom bar ───────────────────────────────────────────── */}
+      {/* ── Bottom bar ───────────────────────────────────────────────
+          position:relative so the history trail can be absolutely centered (#14): the
+          left scope-cluster and right count both grow/shrink, but the centered trail no
+          longer shifts with them. All "filtery things" (namespace + faults + grouping)
+          now live in the left cluster here, not split between header and footer. */}
       <div
         style={{
           position: 'absolute', bottom: 0, left: 0, right: 0, height: 36,
@@ -492,89 +506,178 @@ export function HUD({ panelWidth = 288 }) {
           borderTop: '1px solid rgba(var(--mz-accent-rgb),0.06)',
         }}
       >
-        {(
-          <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexShrink: 0 }}>
-            {/* Bare-minimum shortcut hints (#72) - everything else lives in the ? help modal */}
-            <Hint keys={['j', 'k']} label="select" />
-            <Hint keys={[':']} label="resource" />
-            <Hint keys={['/']} label="filter" />
-            <Hint keys={['?']} label="help" />
-            {/* State pills (not shortcut spam) stay so the user can see/clear active modes */}
-            {selectedIds?.size > 0 && (
-              <span style={{ fontSize: 10, color: 'var(--mz-warn-2)', background: 'rgba(var(--mz-warn-2-rgb),0.1)', border: '1px solid rgba(var(--mz-warn-2-rgb),0.3)', borderRadius: 3, padding: '1px 6px' }}>
-                {selectedIds.size} marked
-              </span>
-            )}
-            {sortKey && (
-              <span
-                onClick={clearSort}
-                title="Clear sort"
-                style={{ cursor: 'pointer', fontSize: 10, color: 'var(--mz-accent)', background: 'rgba(var(--mz-accent-rgb),0.1)', border: '1px solid rgba(var(--mz-accent-rgb),0.3)', borderRadius: 3, padding: '1px 6px' }}
-              >
-                sort: {sortKey} {sortDir === 'asc' ? '▲' : '▼'} <span style={{ opacity: 0.5 }}>×</span>
-              </span>
-            )}
-            {faultsOnly && (
-              <span
-                onClick={toggleFaults}
-                title="Show all (ctrl+z)"
-                style={{ cursor: 'pointer', fontSize: 10, color: 'var(--mz-danger)', background: 'rgba(var(--mz-danger-rgb),0.12)', border: '1px solid rgba(var(--mz-danger-rgb),0.4)', borderRadius: 3, padding: '1px 6px' }}
-              >
-                faults only <span style={{ opacity: 0.6 }}>×</span>
-              </span>
-            )}
-          </div>
-        )}
+        {/* Left: shortcut hints + the unified filter/scope cluster */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexShrink: 0, minWidth: 0 }}>
+          {/* Bare-minimum shortcut hints (#72) - everything else lives in the ? help modal */}
+          <Hint keys={['j', 'k']} label="select" />
+          <Hint keys={[':']} label="resource" />
+          <Hint keys={['/']} label="filter" />
+          <Hint keys={['?']} label="help" />
 
-        {/* History / breadcrumb trail - takes the whole middle of the FOOTER (flex:1) so the
-            FULL stack is visible, not just the immediate prev/next. Each crumb is clickable and
-            jumps straight to its point in history via navGo(delta). Kept distinct from the
-            header's "current resource" indicator (per user request). Scrolls horizontally if
-            the trail outgrows the available width. */}
-        <div style={{ flex: 1, minWidth: 0, display: 'flex', justifyContent: 'center' }}>
-          {showBreadcrumb && (
+          {/* ── Filter / scope chips (#14) - one home for every list-scoping control ──
+              The namespace scope indicator moved up next to the resource name in the header
+              (#23) so all "what am I looking at" cues read in one place; it's no longer
+              duplicated here. Grouping / faults / sort still live in this cluster. */}
+          {/* Namespace grouping toggle (flat list ⇄ grouped headers) */}
+          {namespacedView && (
+            <button
+              onClick={toggleGroupByNamespace}
+              title="Toggle namespace grouping (ctrl+g)"
+              style={{
+                display: 'inline-flex', alignItems: 'center', gap: 4, cursor: 'pointer',
+                padding: '1px 6px', borderRadius: 3, fontSize: 10, fontFamily: 'inherit',
+                color: groupByNamespace ? 'var(--mz-accent)' : 'var(--mz-accent-2)',
+                background: groupByNamespace ? 'rgba(var(--mz-accent-rgb),0.1)' : 'rgba(255,255,255,0.04)',
+                border: `1px solid ${groupByNamespace ? 'rgba(var(--mz-accent-rgb),0.3)' : 'rgba(255,255,255,0.1)'}`,
+              }}
+            >
+              <span style={{ fontSize: 11, lineHeight: 1 }}>{groupByNamespace ? '⊟' : '≡'}</span>
+              {groupByNamespace ? 'grouped' : 'flat'}
+            </button>
+          )}
+          {/* Detail-drawer on/off toggle (#todo3) - moved here next to the flat/group toggle
+              (#25). Off = the right panel never opens, even on selection, giving the list its
+              full width. State persists across reloads. */}
+          <button
+            onClick={togglePanel}
+            title="Toggle detail drawer (ctrl+\\)"
+            style={{
+              display: 'inline-flex', alignItems: 'center', gap: 4, cursor: 'pointer',
+              padding: '1px 6px', borderRadius: 3, fontSize: 10, fontFamily: 'inherit',
+              color: panelEnabled ? 'var(--mz-accent)' : 'var(--mz-accent-2)',
+              background: panelEnabled ? 'rgba(var(--mz-accent-rgb),0.1)' : 'rgba(255,255,255,0.04)',
+              border: `1px solid ${panelEnabled ? 'rgba(var(--mz-accent-rgb),0.3)' : 'rgba(255,255,255,0.1)'}`,
+            }}
+          >
+            <span style={{ fontSize: 11, lineHeight: 1 }}>{panelEnabled ? '◧' : '▭'}</span>
+            {panelEnabled ? 'drawer' : 'wide'}
+          </button>
+          {/* Faults-only filter (toggle via ctrl+z or this chip) */}
+          {faultsOnly && (
+            <span
+              onClick={toggleFaults}
+              title="Show all (ctrl+z)"
+              style={{ cursor: 'pointer', fontSize: 10, color: 'var(--mz-danger)', background: 'rgba(var(--mz-danger-rgb),0.12)', border: '1px solid rgba(var(--mz-danger-rgb),0.4)', borderRadius: 3, padding: '1px 6px' }}
+            >
+              faults only <span style={{ opacity: 0.6 }}>×</span>
+            </span>
+          )}
+          {/* State pills - mark count + active sort */}
+          {selectedIds?.size > 0 && (
+            <span style={{ fontSize: 10, color: 'var(--mz-warn-2)', background: 'rgba(var(--mz-warn-2-rgb),0.1)', border: '1px solid rgba(var(--mz-warn-2-rgb),0.3)', borderRadius: 3, padding: '1px 6px' }}>
+              {selectedIds.size} marked
+            </span>
+          )}
+          {sortKey && (
+            <span
+              onClick={clearSort}
+              title="Clear sort"
+              style={{ cursor: 'pointer', fontSize: 10, color: 'var(--mz-accent)', background: 'rgba(var(--mz-accent-rgb),0.1)', border: '1px solid rgba(var(--mz-accent-rgb),0.3)', borderRadius: 3, padding: '1px 6px' }}
+            >
+              sort: {sortKey} {sortDir === 'asc' ? '▲' : '▼'} <span style={{ opacity: 0.5 }}>×</span>
+            </span>
+          )}
+        </div>
+
+        {/* ── History trail (#17) - ABSOLUTELY centered so the variable-width scope cluster
+            and count never shift it (#14). A leading ⟲ glyph + a filled "current" pill make
+            it more legible than the old flat row. Toggle off via the ⟲ button at far right;
+            when off the trail is hidden but nav state is preserved (`[`/`]` still work). */}
+        {historyEnabled && showBreadcrumb && (
+          <div style={{
+            position: 'absolute', left: '50%', bottom: 0, height: 36, transform: 'translateX(-50%)',
+            display: 'flex', alignItems: 'center', maxWidth: '46%', pointerEvents: 'none',
+          }}>
             <div style={{
-              display: 'flex', alignItems: 'center', minWidth: 0, maxWidth: '100%',
-              background: 'rgba(var(--mz-accent-rgb),0.04)', border: '1px solid rgba(var(--mz-accent-rgb),0.1)',
-              borderRadius: 4, padding: '2px 8px', fontSize: 10, whiteSpace: 'nowrap',
-              overflowX: 'auto', overflowY: 'hidden',
+              display: 'flex', alignItems: 'center', gap: 2, minWidth: 0, maxWidth: '100%',
+              background: 'rgba(var(--mz-accent-rgb),0.05)', border: '1px solid rgba(var(--mz-accent-rgb),0.14)',
+              borderRadius: 5, padding: '2px 8px', fontSize: 10, whiteSpace: 'nowrap',
+              overflowX: 'auto', overflowY: 'hidden', pointerEvents: 'auto',
             }}>
-              {/* Overflow ⋯ - the leftmost crumb when the trail exceeds MAX_CRUMBS. Clicking it
-                  jumps all the way back to the oldest frame (carousel cap, #todo4). */}
+              <span style={{ color: 'var(--mz-accent-2)', opacity: 0.7, marginRight: 4, flexShrink: 0, fontSize: 11 }} title="History">⟲</span>
+              {/* Overflow ⋯ - leftmost slot when the trail exceeds MAX_CRUMBS; jumps to oldest. */}
               {hiddenCount > 0 && (
                 <span style={{ display: 'inline-flex', alignItems: 'center', flexShrink: 0 }}>
                   <span
                     onClick={() => navGo(-navStack.length)}
                     title={`${hiddenCount} more - jump to start`}
-                    style={{ color: 'var(--mz-accent-2)', cursor: 'pointer', whiteSpace: 'nowrap' }}
-                  >
-                    ⋯
-                  </span>
-                  <span style={{ color: 'var(--mz-text-faint)', padding: '0 4px' }}>›</span>
+                    style={{ color: 'var(--mz-accent-2)', cursor: 'pointer', padding: '0 3px' }}
+                  >⋯</span>
+                  <span style={{ color: 'var(--mz-text-faint)', padding: '0 2px' }}>›</span>
                 </span>
               )}
-              {/* The capped trail: past → current → future, separated by › */}
+              {/* The capped trail: past → current → future. The current view renders as a
+                  filled accent pill; past/future as clickable ghost text with › separators. */}
               {shownTrail.map((c, i) => (
                 <span key={c.key} style={{ display: 'inline-flex', alignItems: 'center', flexShrink: 0 }}>
-                  {i > 0 && <span style={{ color: 'var(--mz-text-faint)', padding: '0 4px' }}>›</span>}
-                  <span
-                    onClick={c.onClick || undefined}
-                    title={c.title || undefined}
-                    style={{
-                      color: c.color, opacity: c.opacity, fontWeight: c.weight,
-                      cursor: c.onClick ? 'pointer' : 'default', whiteSpace: 'nowrap',
-                    }}
-                  >
-                    {c.label}
-                  </span>
+                  {i > 0 && <span style={{ color: 'var(--mz-text-faint)', padding: '0 3px' }}>›</span>}
+                  {c.current ? (
+                    <span style={{
+                      color: 'var(--mz-accent)', background: 'rgba(var(--mz-accent-rgb),0.16)',
+                      border: '1px solid rgba(var(--mz-accent-rgb),0.32)', borderRadius: 3,
+                      padding: '0 6px', fontWeight: 600,
+                    }}>{c.label}</span>
+                  ) : (
+                    <span
+                      onClick={c.onClick || undefined}
+                      title={c.title || undefined}
+                      style={{
+                        color: c.color, opacity: c.opacity, fontWeight: c.weight,
+                        cursor: c.onClick ? 'pointer' : 'default', padding: '0 2px',
+                      }}
+                      onMouseEnter={e => { if (c.onClick) e.target.style.color = 'var(--mz-text)' }}
+                      onMouseLeave={e => { if (c.onClick) e.target.style.color = c.color }}
+                    >{c.label}</span>
+                  )}
                 </span>
               ))}
             </div>
-          )}
-        </div>
+          </div>
+        )}
 
-        <div style={{ fontSize: 10, flexShrink: 0, color: 'var(--mz-text-dim)', fontFamily: 'inherit' }}>
-          {filteredCount}&nbsp;<span style={{ color: 'var(--mz-text-faint)' }}>/</span>&nbsp;{totalCount}&nbsp;{resourceLabel}
+        <div style={{ flex: 1 }} />
+
+        {/* Right: history controls + the count. Two distinct controls (#22):
+            - the eye toggles the trail's *visibility* (show/hide); it does NOT clear it
+              (ctrl+y), so the nav state survives and `[`/`]` still work.
+            - the ⟲ *clears/resets* the trail (ctrl+shift+y); only shown when there is
+              history to reset. */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
+          {(showBreadcrumb || !historyEnabled) && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              <button
+                onClick={toggleHistory}
+                title={historyEnabled ? 'Hide history trail (ctrl+y)' : 'Show history trail (ctrl+y)'}
+                style={{
+                  display: 'inline-flex', alignItems: 'center', gap: 4, cursor: 'pointer',
+                  padding: '1px 6px', borderRadius: 3, fontSize: 10, fontFamily: 'inherit',
+                  color: historyEnabled ? 'var(--mz-accent-2)' : 'var(--mz-text-dim)',
+                  background: historyEnabled ? 'rgba(var(--mz-accent-rgb),0.08)' : 'rgba(255,255,255,0.04)',
+                  border: `1px solid ${historyEnabled ? 'rgba(var(--mz-accent-rgb),0.22)' : 'rgba(255,255,255,0.1)'}`,
+                }}
+              >
+                <EyeIcon off={!historyEnabled} />
+                history
+              </button>
+              {historyEnabled && showBreadcrumb && (navStack.length > 0 || navFuture.length > 0) && (
+                <button
+                  onClick={clearHistory}
+                  title="Clear history trail (ctrl+shift+y)"
+                  style={{
+                    display: 'inline-flex', alignItems: 'center', cursor: 'pointer',
+                    padding: '1px 5px', borderRadius: 3, fontSize: 11, lineHeight: 1, fontFamily: 'inherit',
+                    color: 'var(--mz-text-dim)', background: 'rgba(255,255,255,0.04)',
+                    border: '1px solid rgba(255,255,255,0.1)',
+                  }}
+                  onMouseEnter={e => e.currentTarget.style.color = 'var(--mz-text)'}
+                  onMouseLeave={e => e.currentTarget.style.color = 'var(--mz-text-dim)'}
+                >⟲</button>
+              )}
+            </div>
+          )}
+          <div style={{ fontSize: 10, color: 'var(--mz-text-dim)', fontFamily: 'inherit' }}>
+            {filteredCount}&nbsp;<span style={{ color: 'var(--mz-text-faint)' }}>/</span>&nbsp;{totalCount}&nbsp;{resourceLabel}
+          </div>
         </div>
       </div>
     </>

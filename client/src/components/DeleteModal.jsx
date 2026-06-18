@@ -64,7 +64,7 @@ export function DeleteModal() {
           position: 'relative', padding: '28px 32px', borderRadius: 8,
           background: 'rgba(var(--mz-surface-rgb),0.98)',
           border: '1px solid rgba(var(--mz-danger-rgb),0.35)',
-          boxShadow: '0 0 40px rgba(var(--mz-danger-rgb),0.12)',
+          boxShadow: '0 0 50px rgba(var(--mz-danger-rgb),0.13)',
           minWidth: 360, maxWidth: 520,
         }}
         onClick={e => e.stopPropagation()}

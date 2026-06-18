@@ -9,6 +9,15 @@ const navFrame = (s) => ({
   drilldownItems: s.drilldownItems, drilldownLabel: s.drilldownLabel,
 })
 
+// Cap the back-history so the trail can't grow without bound (#17). The newest MAX_NAV_STACK
+// frames are kept; older ones drop off the left. `[`/`]` and the footer carousel operate on
+// whatever is retained. Push helper used everywhere a frame is recorded.
+const MAX_NAV_STACK = 50
+const pushNav = (stack, frame) => {
+  const next = [...stack, frame]
+  return next.length > MAX_NAV_STACK ? next.slice(next.length - MAX_NAV_STACK) : next
+}
+
 export const CLUSTER_SCOPED_RESOURCES = new Set([
   'nodes', 'pvs', 'namespaces', 'crds', 'clusterroles', 'clusterrolebindings', 'storageclasses',
 ])
@@ -205,6 +214,10 @@ export const useStore = create((set, get) => ({
   navFuture: [],         // frames for forward navigation
   drilldownItems: null,  // when set, overrides s[activeResource] in list
   drilldownLabel: '',    // e.g. "api-server › pods"
+  // History trail on/off (#17). When off, the footer carousel is hidden, but nav state is
+  // NOT cleared - `[`/`]` still work and flipping it back on shows the existing trail again.
+  // Persisted so it survives reloads.
+  historyEnabled: (() => { try { return localStorage.getItem('mezz-history') !== 'off' } catch { return true } })(),
 
   // Namespace picker mode (:ns command)
   nsPickerMode: false,
@@ -228,7 +241,7 @@ export const useStore = create((set, get) => ({
   setActiveResource: (r) => set(s => ({
     activeResource: r, selectedId: null, selectedIds: new Set(), filter: '', filterActive: false, filterPinned: false,
     // Record the view we're leaving so `[` can come back to it (skip self-switches). (#79)
-    navStack: r === s.activeResource ? s.navStack : [...s.navStack, navFrame(s)],
+    navStack: r === s.activeResource ? s.navStack : pushNav(s.navStack, navFrame(s)),
     navFuture: [], drilldownItems: null, drilldownLabel: '',
     nsPickerMode: false, previousResource: null,
     sortKey: null, sortDir: 'asc',
@@ -252,6 +265,14 @@ export const useStore = create((set, get) => ({
     try { localStorage.setItem('mezz-panel', next ? 'on' : 'off') } catch { /* ignore */ }
     return { panelEnabled: next }
   }),
+  toggleHistory: () => set(s => {
+    const next = !s.historyEnabled
+    try { localStorage.setItem('mezz-history', next ? 'on' : 'off') } catch { /* ignore */ }
+    return { historyEnabled: next }
+  }),
+  // Clear/reset the history trail (#22). Wipes both back and forward stacks but leaves the
+  // current view untouched - distinct from toggleHistory, which only hides/shows the trail.
+  clearHistory: () => set({ navStack: [], navFuture: [] }),
 
   // Toggle sort direction when the same column is re-selected, else switch column (asc).
   setSort: (key) => set(s => key === s.sortKey
@@ -295,7 +316,7 @@ export const useStore = create((set, get) => ({
       const s = get()
       set({
         activeResource: resolved, selectedId: null, selectedIds: new Set(), filter: '', filterActive: false, filterPinned: false,
-        navStack: resolved === s.activeResource ? s.navStack : [...s.navStack, navFrame(s)],
+        navStack: resolved === s.activeResource ? s.navStack : pushNav(s.navStack, navFrame(s)),
         navFuture: [], drilldownItems: null, drilldownLabel: '',
         nsPickerMode: false, previousResource: null,
         sortKey: null, sortDir: 'asc',
@@ -468,7 +489,7 @@ export const useStore = create((set, get) => ({
     const key = `${group}/${version}/${plural}`
     set(s => ({
       activeResource: `cr:${key}`, selectedId: null, filter: '', filterActive: false, filterPinned: false,
-      navStack: `cr:${key}` === s.activeResource ? s.navStack : [...s.navStack, navFrame(s)],
+      navStack: `cr:${key}` === s.activeResource ? s.navStack : pushNav(s.navStack, navFrame(s)),
       navFuture: [], drilldownItems: null, drilldownLabel: '',
     }))
     try {
@@ -594,7 +615,7 @@ export const useStore = create((set, get) => ({
       i.name === owner.name && (owner.namespace ? i.namespace === owner.namespace : true))
     if (!target) return
     set({
-      navStack: [...s.navStack, navFrame(s)], navFuture: [],
+      navStack: pushNav(s.navStack, navFrame(s)), navFuture: [],
       activeResource: owner.resource, drilldownItems: null, drilldownLabel: '',
       activeNamespace: owner.namespace || s.activeNamespace,
       filter: '', filterActive: false, filterPinned: false,

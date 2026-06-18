@@ -10,9 +10,11 @@ const SECTIONS = [
       ['gg / G', 'First / last row'],
       ['Enter', 'Drill in (CRD: list its resources)'],
       ['[ / ]', 'History back / forward'],
+      ['ctrl+y', 'Show / hide history trail'],
+      ['ctrl+shift+y', 'Clear history trail'],
       ['ctrl+b', 'Toggle sidebar'],
       ['ctrl+\\', 'Toggle detail drawer'],
-      ['Esc', 'Step back / clear'],
+      ['Esc', 'Clear selection / filter (not history)'],
     ],
   },
   {

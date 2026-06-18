@@ -795,8 +795,10 @@ export function ActionModal() {
           width: (isYamlOrEdit || type === 'helm-history') ? 'min(920px, 94vw)' : 'min(860px, 92vw)',
           height: 'min(640px, 86vh)',
           background: 'rgba(var(--mz-surface-rgb),0.98)',
-          border: `1px solid ${alpha(lineColor, 16)}`,
-          boxShadow: `0 0 50px ${alpha(lineColor, 7)}`,
+          // Consistent modal glow (#19): same border/shadow strength as the menu modals,
+          // tinted to this modal's accent (lineColor) rather than always cyan.
+          border: `1px solid ${alpha(lineColor, 28)}`,
+          boxShadow: `0 0 50px ${alpha(lineColor, 13)}`,
         }}
         onClick={e => e.stopPropagation()}
       >
@@ -1204,8 +1206,10 @@ export function ActionModal() {
                   fontFamily: 'inherit', transition: 'all 0.15s',
                 }}>#</button>
             )}
-            {/* Copy button */}
-            {(isInspect ? (editMode ? !!editContent : !!displayContent) : ((type === 'logs' || isHelm) && content)) && !loading && (
+            {/* Copy button - read views + logs/helm only. Hidden in edit mode (#16): the
+                editor owns the buffer (yank/registers handle copying), and a Copy chip there
+                competes with the Apply/VIM controls. */}
+            {(isInspect ? (!editMode && !!displayContent) : ((type === 'logs' || isHelm) && content)) && !loading && (
               <button onClick={doCopy} style={{
                 fontSize: 10, padding: '1px 7px', borderRadius: 3, cursor: 'pointer',
                 color: copyFlash ? 'var(--mz-ok)' : 'var(--mz-accent-2)',
@@ -1231,7 +1235,8 @@ export function ActionModal() {
               {!editMode && !helmHistoryTable && <VimHint k="gg/G" label="top/bottom" />}
               {isInspect && !editMode && <VimHint k="Tab" label="describe/yaml/json" />}
               {(type === 'helm-values' || helmHistoryPeek) && <VimHint k="Tab" label="user/all" />}
-              {isInspect && !editMode && <VimHint k="e" label="edit" />}
+              {/* The `e` edit hint moved to the dedicated ✎ Edit button (#24), which already
+                  shows its shortcut - no need to repeat it in the left-hand hint cluster. */}
               {!editMode && !helmHistoryTable && <VimHint k="/" label="search" />}
               {!editMode && !helmHistoryTable && <VimHint k="n/N" label="next/prev" />}
               {isSecret && isInspect && !editMode && <VimHint k="x" label="decode" />}
@@ -1267,12 +1272,42 @@ export function ActionModal() {
                 ))}
               </div>
             )}
+            {/* Edit button (#15) - a real button for the `e` shortcut, so non-vim/k9s users
+                can get into edit mode by clicking. Mirrors the `e` key handler exactly:
+                describe isn't editable so it falls back to yaml, line numbers default on. */}
+            {isInspect && !editMode && (
+              <button
+                onClick={() => {
+                  if (viewFormat === 'describe') setViewFormat('yaml')
+                  setEditMode(true)
+                  setShowLineNumbers(true)
+                }}
+                title="Edit (e)"
+                style={{
+                  fontSize: 10, padding: '2px 12px', borderRadius: 3, cursor: 'pointer',
+                  color: 'var(--mz-orange)', background: 'rgba(var(--mz-orange-rgb),0.1)',
+                  border: '1px solid rgba(var(--mz-orange-rgb),0.4)', fontFamily: 'inherit',
+                  transition: 'all 0.15s',
+                }}
+              >✎ Edit <span style={{ opacity: 0.5, fontSize: 9 }}>e</span></button>
+            )}
             {/* Edit mode controls */}
             {isYamlOrEdit && editMode && (
               <>
                 {resource === 'pods' && (
                   <span style={{ fontSize: 10, color: 'var(--mz-text-faint)' }}>most pod fields are immutable</span>
                 )}
+                {/* Back-to-read button (#15) - non-vim users have no `:q`/Esc path out of the
+                    editor, so give them an explicit way to drop edits and return to the view. */}
+                <button
+                  onClick={() => setEditMode(false)}
+                  title="Discard edits, back to view"
+                  style={{
+                    fontSize: 10, padding: '2px 10px', borderRadius: 3, cursor: 'pointer',
+                    color: 'var(--mz-text-dim)', background: 'rgba(255,255,255,0.04)',
+                    border: '1px solid rgba(255,255,255,0.1)', fontFamily: 'inherit', transition: 'all 0.15s',
+                  }}
+                >← View</button>
                 <button
                   onClick={() => { setEditVimMode(v => !v); setVimMode('normal') }}
                   style={{

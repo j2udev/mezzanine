@@ -174,7 +174,8 @@ export function ExecModal() {
           width: 'min(960px, 95vw)', height: 'min(620px, 88vh)', overflow: 'hidden',
           display: 'flex', flexDirection: 'column',
           borderRadius: 8, background: 'rgba(var(--mz-surface-rgb),0.98)',
-          border: `1px solid ${alpha(ACCENT, 19)}`, boxShadow: `0 0 50px ${alpha(ACCENT, 7)}`,
+          // Consistent modal glow (#19) - matches the other modals.
+          border: `1px solid ${alpha(ACCENT, 28)}`, boxShadow: `0 0 50px ${alpha(ACCENT, 13)}`,
         }}
       >
         {/* Header */}

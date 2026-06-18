@@ -89,6 +89,15 @@ export function useKeys() {
         return
       }
 
+      // ctrl+y: toggle the history trail's visibility (show/hide). ctrl+shift+y clears it.
+      // Placed before the object-action dispatch so it doesn't collide with `y` (= yaml). (#22)
+      if (e.ctrlKey && (e.key === 'y' || e.key === 'Y')) {
+        e.preventDefault()
+        if (e.shiftKey) s.clearHistory()
+        else s.toggleHistory()
+        return
+      }
+
       // ctrl+k: instant kill, no confirmation (multi-select aware)
       if (e.ctrlKey && e.key === 'k') {
         e.preventDefault()
@@ -229,10 +238,11 @@ export function useKeys() {
           break
 
         case 'Escape':
+          // Esc steps back through *view* state only - it never pops the history/nav stack
+          // (#22). Use `[` / `]` (or the footer trail) to navigate history explicitly.
           if (s.nsPickerMode)              { s.exitNsPickerMode();          break }
           if (s.selectedIds.size > 0)      { s.clearMultiSelect();          break }
           if (s.selectedId)                { s.setSelected(null);           break }
-          if (s.navStack.length)           { s.navBack();                   break }
           if (s.activeNamespace !== 'all') { s.setActiveNamespace('all');   break }
           if (s.filterPinned || s.filter)  { s.clearFilter();               break }
           break
