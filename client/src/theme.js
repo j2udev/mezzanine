@@ -29,15 +29,15 @@ export const THEMES = {
       surface:     '#0c1626', // rgba surfaces / panels
       backdrop:    '#01050e', // modal backdrops / deep wells
       border:      '#1b3048',
-      'text-bright': '#e8f4ff',
-      text:        '#c0d8f0',
-      'text-mid':  '#9ab8d0',
-      'text-dim':  '#5e90b0',
-      'text-faint':'#4e7090',
-      'text-muted':'#8a9cae',
-      accent:        '#00d4ff',
-      'accent-strong':'#00aaff',
-      'accent-2':  '#72b0d0',
+      'text-bright': '#f0f8ff',
+      text:        '#cce0f5',
+      'text-mid':  '#a8c4dc',
+      'text-dim':  '#7aa8c8',
+      'text-faint':'#6488a8',
+      'text-muted':'#a0b2c4',
+      accent:        '#00e0ff',
+      'accent-strong':'#00b8ff',
+      'accent-2':  '#8cc8e8',
       info:        '#44aaff',
       alt:         '#aa55ff',
       ok:          '#00ffaa',
@@ -78,9 +78,9 @@ export const THEMES = {
       'text-bright': '#f6f7fa',
       text:        '#e4e6ec',
       'text-mid':  '#c2c6d0',
-      'text-dim':  '#9197a4',   // neutral gray, not blue-gray
-      'text-faint':'#666b78',
-      'text-muted':'#7d828e',
+      'text-dim':  '#a3a9b5',   // neutral gray, not blue-gray
+      'text-faint':'#7e8492',
+      'text-muted':'#959aa6',
       // Primary accent = bold, saturated brand BLUE (selection, focus, links, wordmark).
       accent:        '#3b82f6',
       'accent-strong':'#2b5ab7',
