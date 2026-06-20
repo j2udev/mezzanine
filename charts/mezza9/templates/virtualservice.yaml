@@ -1,0 +1,62 @@
+{{- if .Values.virtualService.enabled -}}
+{{- $vs := .Values.virtualService -}}
+{{- $fullName := include "mezza9.fullname" . -}}
+{{- $svcHost := printf "%s.%s.svc.cluster.local" $fullName .Release.Namespace -}}
+{{- $svcPort := $vs.port | default .Values.service.port -}}
+apiVersion: {{ $vs.apiVersion | default "networking.istio.io/v1" }}
+kind: VirtualService
+metadata:
+  name: {{ $vs.name | default $fullName }}
+  labels:
+    {{- include "mezza9.labels" . | nindent 4 }}
+    {{- with $vs.labels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+  {{- with $vs.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  {{- if not $vs.delegate }}
+  {{- with $vs.hosts }}
+  hosts:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  {{- with $vs.gateways }}
+  gateways:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  {{- end }}
+  {{- with $vs.exportTo }}
+  exportTo:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  http:
+  {{- if $vs.http }}
+    {{- toYaml $vs.http | nindent 4 }}
+  {{- else }}
+    -
+      {{- with $vs.match }}
+      match:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- if $vs.delegateTo }}
+      delegate:
+        {{- toYaml $vs.delegateTo | nindent 8 }}
+      {{- else }}
+      route:
+        - destination:
+            host: {{ $svcHost }}
+            port:
+              number: {{ $svcPort }}
+      {{- end }}
+  {{- end }}
+  {{- with $vs.tls }}
+  tls:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  {{- with $vs.tcp }}
+  tcp:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+{{- end }}

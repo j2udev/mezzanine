@@ -1,0 +1,151 @@
+# Default values for the Mezzanine chart.
+
+# Number of dashboard replicas. Port-forwards and the resource cache are per-pod
+# (in-memory), so multiple replicas behind the Service give you N independent
+# instances rather than shared state. 1 is the sensible default.
+replicaCount: 1
+
+image:
+  # Published from the repo Dockerfile to GitHub Container Registry.
+  repository: ghcr.io/j2udev/mezza9
+  pullPolicy: IfNotPresent
+  # Snapshot tag. Leave empty to fall back to the chart appVersion.
+  tag: "0.1.0-snapshot"
+
+imagePullSecrets: []
+nameOverride: ""
+fullnameOverride: ""
+
+serviceAccount:
+  # Create a dedicated ServiceAccount. Required for in-cluster RBAC.
+  create: true
+  annotations: {}
+  # If empty and create=true, a name is generated from the release.
+  name: ""
+
+rbac:
+  # Create the ClusterRole + ClusterRoleBinding that let the dashboard read the
+  # whole cluster (and mutate it, unless readOnly below).
+  create: true
+  # readOnly=false grants the write verbs the UI needs for delete / edit (apply) /
+  # port-forward / helm rollback. Set true to deploy a strictly read-only viewer.
+  readOnly: false
+
+# Mezzanine watches all namespaces and lists cluster-scoped resources, so it uses a
+# ClusterRole by default. (A namespace-scoped Role is not offered - the app's
+# *ForAllNamespaces / listNode / listClusterRole calls would 403.)
+
+service:
+  type: ClusterIP
+  port: 80
+  # targetPort follows containerPort below.
+
+# Container port the server listens on (sets the PORT env var). 3001 is the app default.
+containerPort: 3001
+
+ingress:
+  enabled: false
+  className: ""
+  annotations: {}
+  hosts:
+    - host: mezza9.local
+      paths:
+        - path: /
+          pathType: Prefix
+  tls: []
+  #  - secretName: mezza9-tls
+  #    hosts:
+  #      - mezza9.local
+
+# Istio VirtualService. Requires Istio (the networking.istio.io CRDs) installed in the
+# cluster. Use it to expose the dashboard through an Istio ingress/mesh gateway, or to ship a
+# *delegate* VirtualService that an org-level root VirtualService references. (#92)
+virtualService:
+  enabled: false
+  # CRD apiVersion. networking.istio.io/v1 is current (v1beta1 also works on older Istio).
+  apiVersion: networking.istio.io/v1
+  # Override the generated name (defaults to the release fullname).
+  name: ""
+  annotations: {}
+  labels: {}
+  # Hosts this VS matches (e.g. dashboard.example.com, or "*" for a dedicated gateway).
+  # IGNORED when delegate=true - a delegate VirtualService must not declare hosts.
+  hosts:
+    - mezza9.local
+  # Gateways to bind to: a Gateway resource ("<namespace>/<name>") for ingress, and/or the
+  # reserved "mesh" keyword for sidecar (east-west) traffic. IGNORED when delegate=true.
+  gateways:
+    - istio-system/mezza9-gateway
+  # Optional HTTP match conditions for the generated route (e.g. a URI prefix).
+  # Empty list = match all traffic for the host.
+  match: []
+  #  - uri:
+  #      prefix: /
+  # Destination port for the generated route to the dashboard Service. Empty = service.port.
+  port: ""
+  # Render THIS object as a DELEGATE VirtualService: omit hosts/gateways and emit only the
+  # route(s), so a separate root VirtualService can reference it via `http[].delegate`.
+  delegate: false
+  # Make the generated route DELEGATE to another VirtualService instead of routing to the
+  # dashboard Service - i.e. render a *root* VS that points at an existing delegate. Set
+  # {name, namespace}. Mutually exclusive with the default route; ignored when delegate=true.
+  delegateTo: {}
+  #  name: some-delegate-vs
+  #  namespace: some-namespace
+  # Advanced escape hatches - raw route arrays rendered verbatim. If `http` is non-empty it
+  # REPLACES the generated HTTP route entirely; `tls`/`tcp` are always appended as given.
+  http: []
+  tls: []
+  tcp: []
+  # Limit visibility of this VS to namespaces (Istio exportTo), e.g. ["."] or ["*"].
+  exportTo: []
+
+# Demo/mock mode (MEZZ_DEMO=1). Serves a fake cluster - handy for trying the UI
+# without granting real RBAC. Leave false for a real in-cluster deploy.
+demo:
+  enabled: false
+
+resources:
+  requests:
+    cpu: 50m
+    memory: 128Mi
+  limits:
+    memory: 512Mi
+
+# Extra environment variables for the container.
+extraEnv: []
+#  - name: FOO
+#    value: bar
+
+livenessProbe:
+  httpGet:
+    path: /api/health
+    port: http
+  initialDelaySeconds: 10
+  periodSeconds: 20
+readinessProbe:
+  httpGet:
+    path: /api/health
+    port: http
+  initialDelaySeconds: 5
+  periodSeconds: 10
+
+podAnnotations: {}
+podLabels: {}
+
+# Pod-level security context. The image runs as the non-root `node` user (uid 1000).
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 1000
+  fsGroup: 1000
+
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: false
+  capabilities:
+    drop:
+      - ALL
+
+nodeSelector: {}
+tolerations: []
+affinity: {}

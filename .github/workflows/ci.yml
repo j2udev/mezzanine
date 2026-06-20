@@ -1,0 +1,57 @@
+name: CI
+
+# Validates the release artifacts on every PR / push to main WITHOUT publishing:
+#   - the frontend builds (client/dist)
+#   - the Helm chart lints and templates (incl. the Istio VirtualService, #92)
+#   - the container image builds from the Dockerfile (single-arch smoke, no push)
+# The actual multi-arch + OCI publish lives in release.yml (#93).
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+          cache-dependency-path: |
+            package-lock.json
+            client/package-lock.json
+      - name: Build frontend
+        run: |
+          npm ci
+          npm ci --prefix client
+          npm run build
+
+      - uses: azure/setup-helm@v4
+        with:
+          version: v3.20.2
+      - name: Helm lint + template
+        run: |
+          helm lint charts/mezza9
+          helm template ci charts/mezza9 >/dev/null
+          # exercise the Istio VirtualService template in all three shapes
+          helm template ci charts/mezza9 --set virtualService.enabled=true >/dev/null
+          helm template ci charts/mezza9 --set virtualService.enabled=true --set virtualService.delegate=true >/dev/null
+          helm template ci charts/mezza9 --set virtualService.enabled=true \
+            --set virtualService.delegateTo.name=d --set virtualService.delegateTo.namespace=ns >/dev/null
+
+      - uses: docker/setup-buildx-action@v3
+      - name: Docker build (smoke, no push)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64
+          push: false
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

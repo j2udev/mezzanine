@@ -1,0 +1,45 @@
+Mezzanine has been deployed. 🎭
+
+{{- if .Values.demo.enabled }}
+
+⚠  Demo mode is ON (MEZZ_DEMO=1) - you're viewing a mock cluster, not the real one.
+   Set demo.enabled=false for a live in-cluster deploy.
+{{- end }}
+{{- if not .Values.rbac.create }}
+
+⚠  rbac.create=false - no ClusterRole was created. The dashboard will 403 unless the
+   ServiceAccount {{ include "mezza9.serviceAccountName" . }} is bound elsewhere.
+{{- else if .Values.rbac.readOnly }}
+
+ℹ  RBAC is READ-ONLY. Delete / edit / port-forward / helm rollback will be denied.
+{{- end }}
+
+Reach the dashboard:
+{{- if .Values.ingress.enabled }}
+{{- range .Values.ingress.hosts }}
+  http{{ if $.Values.ingress.tls }}s{{ end }}://{{ .host }}
+{{- end }}
+{{- else if eq .Values.service.type "ClusterIP" }}
+
+  kubectl --namespace {{ .Release.Namespace }} port-forward svc/{{ include "mezza9.fullname" . }} 3001:{{ .Values.service.port }}
+
+  then open http://localhost:3001
+{{- else if eq .Values.service.type "LoadBalancer" }}
+
+  kubectl --namespace {{ .Release.Namespace }} get svc {{ include "mezza9.fullname" . }} -w
+  (use the EXTERNAL-IP, port {{ .Values.service.port }})
+{{- end }}
+{{- if .Values.virtualService.enabled }}
+{{- if .Values.virtualService.delegate }}
+
+ℹ  An Istio DELEGATE VirtualService "{{ .Values.virtualService.name | default (include "mezza9.fullname" .) }}" was created.
+   It has no hosts/gateways - reference it from a root VirtualService via http[].delegate.
+{{- else }}
+
+ℹ  An Istio VirtualService routes the following host(s) to the dashboard:
+{{- range .Values.virtualService.hosts }}
+     {{ . }}
+{{- end }}
+   via gateway(s): {{ join ", " .Values.virtualService.gateways }}
+{{- end }}
+{{- end }}

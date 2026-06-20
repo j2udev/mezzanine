@@ -1,0 +1,139 @@
+name: Release
+
+# Publishes the two release artifacts to GitHub Container Registry (GHCR):
+#   1. a multi-arch (linux/amd64 + linux/arm64) container image, and
+#   2. the Helm chart as an OCI artifact.
+# Both are versioned identically (#93).
+#
+# Triggers:
+#   - pushing a SemVer tag (v1.2.3)  -> a real release (also tagged `latest`)
+#   - manual run (workflow_dispatch) -> publish an explicit version, or an
+#     `0.0.0-edge.<sha>` build when no version is given (no `latest`).
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to publish (e.g. 1.2.3). Empty = edge build from the commit SHA."
+        required: false
+        type: string
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  # Resolve one version string used for BOTH the image tag and the chart version, so
+  # they never drift. Also lowercases the owner (GHCR repos must be lowercase).
+  version:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.v.outputs.version }}
+      owner: ${{ steps.v.outputs.owner }}
+      release: ${{ steps.v.outputs.release }}
+    steps:
+      - id: v
+        run: |
+          if [ "${GITHUB_REF_TYPE}" = "tag" ]; then
+            version="${GITHUB_REF_NAME#v}"; release=true
+          elif [ -n "${{ inputs.version }}" ]; then
+            version="${{ inputs.version }}"; version="${version#v}"; release=true
+          else
+            version="0.0.0-edge.${GITHUB_SHA::7}"; release=false
+          fi
+          owner="$(echo "${GITHUB_REPOSITORY_OWNER}" | tr '[:upper:]' '[:lower:]')"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "owner=$owner"     >> "$GITHUB_OUTPUT"
+          echo "release=$release" >> "$GITHUB_OUTPUT"
+          echo "Resolved: version=$version owner=$owner release=$release"
+
+  image:
+    needs: version
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # The Dockerfile expects client/dist to already exist (an in-image vite build
+      # spikes all cores - see CLAUDE.md), so we build the frontend on the runner first.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+          cache-dependency-path: |
+            package-lock.json
+            client/package-lock.json
+      - name: Build frontend (client/dist)
+        run: |
+          npm ci
+          npm ci --prefix client
+          npm run build
+
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ needs.version.outputs.owner }}/mezza9
+          tags: |
+            type=raw,value=${{ needs.version.outputs.version }}
+            type=raw,value=latest,enable=${{ needs.version.outputs.release == 'true' }}
+
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          provenance: false
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  chart:
+    needs: [version, image]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: azure/setup-helm@v4
+        with:
+          version: v3.20.2
+
+      - name: Log in to GHCR (Helm OCI)
+        run: echo "${{ secrets.GITHUB_TOKEN }}" | helm registry login ghcr.io -u "${{ github.actor }}" --password-stdin
+
+      - name: Package & push chart
+        env:
+          VERSION: ${{ needs.version.outputs.version }}
+          OWNER: ${{ needs.version.outputs.owner }}
+        run: |
+          command -v yq >/dev/null || { echo "::error::yq is required (preinstalled on ubuntu-latest runners)"; exit 1; }
+          # Point the published chart's defaults at the image we just pushed, so a bare
+          # `helm install` pulls the matching version. (Edits the checkout only - not committed.)
+          yq -i ".image.repository = \"ghcr.io/${OWNER}/mezza9\" | .image.tag = \"${VERSION}\"" charts/mezza9/values.yaml
+          helm package charts/mezza9 --version "$VERSION" --app-version "$VERSION" --destination dist
+          helm push "dist/mezza9-${VERSION}.tgz" "oci://ghcr.io/${OWNER}/charts"
+
+      - name: Summary
+        env:
+          VERSION: ${{ needs.version.outputs.version }}
+          OWNER: ${{ needs.version.outputs.owner }}
+        run: |
+          {
+            echo "### Published 🎭"
+            echo "- Image: \`ghcr.io/${OWNER}/mezza9:${VERSION}\` (linux/amd64, linux/arm64)"
+            echo "- Chart: \`oci://ghcr.io/${OWNER}/charts/mezza9:${VERSION}\`"
+            echo ""
+            echo "Install:"
+            echo "\`\`\`"
+            echo "helm install mezza9 oci://ghcr.io/${OWNER}/charts/mezza9 --version ${VERSION}"
+            echo "\`\`\`"
+          } >> "$GITHUB_STEP_SUMMARY"

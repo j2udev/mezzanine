@@ -1,0 +1,16 @@
+{{- if .Values.rbac.create -}}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ include "mezza9.fullname" . }}
+  labels:
+    {{- include "mezza9.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ include "mezza9.fullname" . }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "mezza9.serviceAccountName" . }}
+    namespace: {{ .Release.Namespace }}
+{{- end }}
