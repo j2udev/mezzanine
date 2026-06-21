@@ -6,7 +6,8 @@
     "kind@latest",
     "kubectl@latest",
     "kubernetes-helm@latest",
-    "k9s@latest"
+    "k9s@latest",
+    "gh@latest"
   ],
   "shell": {
     "init_hook": [
