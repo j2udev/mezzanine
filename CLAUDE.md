@@ -40,6 +40,7 @@ neon-cursive font - `.mezz-wordmark` in `client/src/index.css`, served from
 │       │   ├── ActionMenu.jsx          # Actions palette (a) - all applicable actions, grouped/filterable
 │       │   ├── PortForwardModal.jsx    # Shift+F port-forward dialog (port suggestions from object)
 │       │   ├── ExecModal.jsx           # `s` interactive pod shell - xterm + /ws/exec websocket (#81)
+│       │   ├── PolicyView.jsx          # RBAC policy / access-review rules table (#94, rendered inside ActionModal)
 │       │   └── HelpModal.jsx           # ? shortcuts overlay
 │       └── hooks/
 │           ├── useWS.js                # WS connection + initial HTTP fetch
@@ -122,6 +123,7 @@ rm ~/.cache/ms-playwright-mcp/mcp-chrome-for-testing-b2bf846/SingletonCookie
 | `[ / ]` | Nav back / forward |
 | `l d y e` | Open logs / describe / yaml / edit modal - d/y/e share ONE unified inspect modal |
 | `x` | Secrets: open inspect modal pre-decoded (k9s-style) |
+| `p` / `Enter` | RBAC (roles/clusterroles/role&clusterrolebindings/serviceaccounts): open the policy / rules view (#94). SA = rules aggregated across every binding that names it |
 | `v m n h` | Helm release: values / manifest / notes / history modal |
 | `s` | Shell into selected pod (or a single container from the pod drilldown) - interactive terminal (#81) |
 | `Shift+F` | Port-forward selected pod / service / deployment / statefulset |
@@ -260,6 +262,8 @@ use it as `var(--mz-<token>)`.
 | POST | `/api/port-forward/:resource/:namespace/:name` | Start `kubectl port-forward` (body `{localPort, remotePort}`) |
 | DELETE | `/api/port-forward/:id` | Stop a port-forward (kills the child process) |
 | GET | `/api/crd/:group/:version/:plural` | List custom resources for a CRD |
+| GET | `/api/rbac/policy/:kind/:namespace/:name` | Effective RBAC policy (#94). `kind` = roles/clusterroles/role&clusterrolebindings/serviceaccounts. Returns `{kind,name,namespace,subject?,roleRef?,subjects?,sources:[{source,scope,aggregated,rules,error?}]}`. SA aggregates all bindings that name it; bindings resolve their roleRef. Cluster-scoped ns = `_` |
+| GET | `/api/rbac/can-i?namespace=` | Self access review for the dashboard's own identity (#94, the `kubectl auth can-i --list` mechanism via SelfSubjectRulesReview + SelfSubjectReview). Returns `{user,groups,namespace,rules,nonResourceRules,incomplete}` |
 | WS  | `/ws/exec?namespace&pod&container&shell&cols&rows` | Interactive pod shell (#81). Binary frames = stdin/stdout bytes; text frames = JSON control (`{type:'resize'}` in, `{type:'ready'\|'error'\|'exit'}` out). Bridges client-node `Exec` ⇄ browser xterm. Live cluster only |
 | GET | `/api/health` | `{"ok":true,"demoMode":bool}` |
 
@@ -383,11 +387,29 @@ container drilldown rows), so it appears as a panel chip + in the `a` palette au
 Live cluster only (rejects in demo mode). Resize is wired via the stdout stream's
 rows/columns + a `resize` event (client-node's `isResizable` detection). Next: #82 debug.
 
+**Session 24:** #94 (RBAC, part 1 of 2). k9s-style **policy / rules view**: `Enter` (or `p`) on
+a Role / ClusterRole / RoleBinding / ClusterRoleBinding / ServiceAccount opens a `POLICY` modal -
+a rules table (API-GROUP · RESOURCE · NAMES · VERBS) with verb chips colored by severity
+(read=green, write=orange, `*`=red), `/`-filterable, `j/k` scroll, Copy. Backend `fetchPolicy()`
+(k8s.js) resolves rules read-only from the rbac.* objects: a role returns its own `.rules`; a
+binding returns subjects + the resolved roleRef's rules; a **ServiceAccount aggregates** the
+rules from every Role/ClusterRoleBinding that names it as a subject (`aggregationRule` detected).
+Plus a **can-i "whoami"** view (`:whoami`/`:can-i`, or the new "Access Review" sidebar entry under
+RBAC): `whoAmI()` runs SelfSubjectRulesReview (= `kubectl auth can-i --list`) for the active
+namespace + SelfSubjectReview for identity, rendered as an identity card + the same rules table +
+non-resource URLs. New endpoints `/api/rbac/policy/:kind/:ns/:name` + `/api/rbac/can-i`; new
+`PolicyView.jsx` rendered inside ActionModal (modal type `policy`); ONE `policy` registry entry in
+actions.js. Demo mode has `getMockPolicy`/`getMockWhoAmI`. **Part 2 (app auth mechanism) was
+explicitly deferred** per discussion - see #94's auth questions; the build covers RBAC only.
+
 **Remaining:**
 - #15 In-cluster deploy
 - #16 Multi-cluster support
 - #17 Single binary packaging
 - #46 Faster auto-refresh
 - #62 syntax highlighting in read views (editor done)
+- #78 BYOA / self-hosted AI agent (discussion pending)
+- #84 vscode extension (discussion pending)
+- #94 part 2: app-level auth mechanism (deferred - proxy-first vs built-in OIDC/impersonation)
 - #14/#71 follow-ups: a light theme + a custom/user-defined color editor are now one
   `THEMES` entry away (deeper contrast tuning lives here)

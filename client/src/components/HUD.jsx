@@ -12,12 +12,14 @@ import { ActionMenu } from './ActionMenu'
 // Built-in resource names the `:` resource picker can autocomplete/cycle through (Tab). The
 // canonical resource names (deduped alias targets) plus the `ns` namespace-picker shortcut.
 // Live CRDs are folded in at render time (#20) so the picker can also find custom resources.
-const COMMAND_OPTIONS = [...new Set([...Object.values(RESOURCE_ALIASES), 'ns'])].sort()
+// 'whoami' is not a resource - it's the RBAC self access-review (#94); folded in here so the
+// `:` picker can surface/complete it like everything else (picking it routes through submitCommand).
+const COMMAND_OPTIONS = [...new Set([...Object.values(RESOURCE_ALIASES), 'ns', 'whoami'])].sort()
 
 // canonical name → every alias that resolves to it (incl. the canonical itself), so the
 // resource dropdown can match what the user types even when it's a short alias (e.g. "svc").
 const ALIASES_FOR = (() => {
-  const m = { ns: ['ns', 'namespace'] }
+  const m = { ns: ['ns', 'namespace'], whoami: ['whoami', 'cani', 'can-i', 'access', 'rbac'] }
   for (const [alias, canon] of Object.entries(RESOURCE_ALIASES)) (m[canon] ||= [canon]).push(alias)
   return m
 })()
@@ -160,8 +162,10 @@ export function HUD({ panelWidth = 288 }) {
   // matched on its kind, plural, and full name so typing any of them surfaces it.
   const candidatePool = useMemo(() => {
     const builtin = COMMAND_OPTIONS.map(n => ({
-      value: n, label: n === 'ns' ? 'namespace (picker)' : n,
-      sublabel: '', aliases: ALIASES_FOR[n] || [n], isCrd: false,
+      value: n,
+      label: n === 'ns' ? 'namespace (picker)' : n === 'whoami' ? 'whoami (access review)' : n,
+      sublabel: n === 'whoami' ? 'kubectl auth can-i' : '',
+      aliases: ALIASES_FOR[n] || [n], isCrd: false,
     }))
     const custom = (crds || []).map(c => ({
       value: `cr:${c.group}/${c.version}/${c.plural}`,

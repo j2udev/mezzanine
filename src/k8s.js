@@ -124,6 +124,154 @@ export async function addEphemeralDebugContainer(namespace, pod, { image, target
   throw new Error('Timed out waiting for the debug container to start.')
 }
 
+// ── RBAC: policy resolution (task 94) ─────────────────────────────────────────
+// k9s-style "what can this resource do". Resolves the *effective rules* of an RBAC
+// object: a Role/ClusterRole returns its own rules; a Role/ClusterRoleBinding returns
+// its subjects + the bound role's rules; a ServiceAccount aggregates the rules from
+// every binding that names it as a subject. This is purely read-only against the
+// rbac.authorization.k8s.io objects (no impersonation needed) - exactly how k9s computes
+// its policy view. See whoAmI() below for the authoritative `kubectl auth can-i --list`.
+
+// Resolve a roleRef ({kind,name}) to its rules array. `namespace` is used for kind=Role.
+async function resolveRoleRules(rbacApi, kind, name, namespace) {
+  try {
+    if (kind === 'ClusterRole') {
+      const cr = await rbacApi.readClusterRole({ name })
+      return { rules: cr.rules || [], aggregated: !!cr.aggregationRule }
+    }
+    const r = await rbacApi.readNamespacedRole({ name, namespace })
+    return { rules: r.rules || [] }
+  } catch (err) {
+    return { rules: [], error: `${kind}/${name}: ${err.body?.message || err.message}` }
+  }
+}
+
+// Does a binding's subject list reference this ServiceAccount? A subject with no namespace
+// inherits the binding's namespace (passed as `bindingNs`).
+function bindingNamesSA(subjects, saName, saNs, bindingNs) {
+  return (subjects || []).some(sub =>
+    sub.kind === 'ServiceAccount' && sub.name === saName &&
+    (sub.namespace || bindingNs) === saNs)
+}
+
+function formatSubject(sub) {
+  if (sub.kind === 'ServiceAccount') return `ServiceAccount/${sub.namespace || ''}/${sub.name}`
+  return `${sub.kind}/${sub.name}`
+}
+
+export async function fetchPolicy(kind, namespace, name) {
+  const kc = await getClient()
+  if (!kc) throw new Error('No live cluster connection.')
+  const lib = await loadK8s()
+  const rbacApi = kc.makeApiClient(lib.RbacAuthorizationV1Api)
+  const k = (kind || '').toLowerCase()
+
+  // Role / ClusterRole - its own rules; the single "source" is the role itself.
+  if (k === 'role' || k === 'clusterrole') {
+    const isCluster = k === 'clusterrole'
+    const obj = isCluster
+      ? await rbacApi.readClusterRole({ name })
+      : await rbacApi.readNamespacedRole({ name, namespace })
+    return {
+      kind: isCluster ? 'ClusterRole' : 'Role', name, namespace: isCluster ? '' : namespace,
+      sources: [{
+        source: `${isCluster ? 'ClusterRole' : 'Role'}/${name}`,
+        scope: isCluster ? 'cluster-wide' : `namespace: ${namespace}`,
+        aggregated: !!obj.aggregationRule,
+        rules: obj.rules || [],
+      }],
+    }
+  }
+
+  // RoleBinding / ClusterRoleBinding - subjects + the bound role's rules.
+  if (k === 'rolebinding' || k === 'clusterrolebinding') {
+    const isCluster = k === 'clusterrolebinding'
+    const obj = isCluster
+      ? await rbacApi.readClusterRoleBinding({ name })
+      : await rbacApi.readNamespacedRoleBinding({ name, namespace })
+    const ref = obj.roleRef || {}
+    // A ClusterRoleBinding's roleRef is always a ClusterRole; a RoleBinding may reference a
+    // ClusterRole (cluster-wide rules applied in the binding's namespace) or a same-namespace Role.
+    const resolved = await resolveRoleRules(rbacApi, ref.kind, ref.name, namespace)
+    return {
+      kind: isCluster ? 'ClusterRoleBinding' : 'RoleBinding', name, namespace: isCluster ? '' : namespace,
+      roleRef: ref.kind && ref.name ? `${ref.kind}/${ref.name}` : '',
+      subjects: (obj.subjects || []).map(formatSubject),
+      sources: [{
+        source: ref.kind && ref.name ? `${ref.kind}/${ref.name}` : '(no roleRef)',
+        scope: isCluster ? 'cluster-wide' : `namespace: ${namespace}`,
+        aggregated: resolved.aggregated, rules: resolved.rules, error: resolved.error,
+      }],
+    }
+  }
+
+  // ServiceAccount - aggregate every Role/ClusterRoleBinding that names it as a subject.
+  if (k === 'serviceaccount') {
+    const [rbRes, crbRes] = await Promise.all([
+      rbacApi.listRoleBindingForAllNamespaces(),
+      rbacApi.listClusterRoleBinding(),
+    ])
+    const sources = []
+    for (const rb of rbRes.items) {
+      if (!bindingNamesSA(rb.subjects, name, namespace, rb.metadata.namespace)) continue
+      const ref = rb.roleRef || {}
+      const resolved = await resolveRoleRules(rbacApi, ref.kind, ref.name, rb.metadata.namespace)
+      sources.push({
+        source: `RoleBinding/${rb.metadata.name} → ${ref.kind}/${ref.name}`,
+        scope: `namespace: ${rb.metadata.namespace}`,
+        aggregated: resolved.aggregated, rules: resolved.rules, error: resolved.error,
+      })
+    }
+    for (const crb of crbRes.items) {
+      if (!bindingNamesSA(crb.subjects, name, namespace, '')) continue
+      const ref = crb.roleRef || {}
+      const resolved = await resolveRoleRules(rbacApi, ref.kind, ref.name, namespace)
+      sources.push({
+        source: `ClusterRoleBinding/${crb.metadata.name} → ${ref.kind}/${ref.name}`,
+        scope: 'cluster-wide',
+        aggregated: resolved.aggregated, rules: resolved.rules, error: resolved.error,
+      })
+    }
+    return { kind: 'ServiceAccount', name, namespace, subject: `system:serviceaccount:${namespace}:${name}`, sources }
+  }
+
+  throw new Error(`Unsupported RBAC kind: ${kind}`)
+}
+
+// ── RBAC: self access review (task 94) ────────────────────────────────────────
+// "What can I (the dashboard's own identity) do?" - the same mechanism `kubectl auth
+// can-i --list` uses. SelfSubjectRulesReview returns the effective rules in a namespace;
+// SelfSubjectReview returns the identity (k8s >= 1.28, optional - older clusters 404).
+export async function whoAmI(namespace = 'default') {
+  const kc = await getClient()
+  if (!kc) throw new Error('No live cluster connection.')
+  const lib = await loadK8s()
+  const authzApi = kc.makeApiClient(lib.AuthorizationV1Api)
+
+  const review = await authzApi.createSelfSubjectRulesReview({
+    body: { apiVersion: 'authorization.k8s.io/v1', kind: 'SelfSubjectRulesReview', spec: { namespace } },
+  })
+  const st = review.status || {}
+
+  let user = null, groups = []
+  try {
+    const authnApi = kc.makeApiClient(lib.AuthenticationV1Api)
+    const me = await authnApi.createSelfSubjectReview({
+      body: { apiVersion: 'authentication.k8s.io/v1', kind: 'SelfSubjectReview', spec: {} },
+    })
+    user = me.status?.userInfo?.username || null
+    groups = me.status?.userInfo?.groups || []
+  } catch { /* SelfSubjectReview unsupported (<1.28); identity stays unknown */ }
+
+  return {
+    user, groups, namespace,
+    rules: st.resourceRules || [],
+    nonResourceRules: st.nonResourceRules || [],
+    incomplete: !!st.incomplete,
+    evaluationError: st.evaluationError || null,
+  }
+}
+
 function age(ts) {
   if (!ts) return ''
   const secs = Math.floor((Date.now() - new Date(ts).getTime()) / 1000)

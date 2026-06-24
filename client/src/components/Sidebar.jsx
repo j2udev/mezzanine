@@ -54,6 +54,8 @@ const GROUPS = [
       { key: 'clusterroles',        label: 'Cluster Roles'        },
       { key: 'rolebindings',        label: 'Role Bindings'        },
       { key: 'clusterrolebindings', label: 'Cluster Role Bindings'},
+      // Self access review (task 94) - opens the whoami modal rather than switching resource.
+      { key: 'whoami',              label: 'Access Review',        action: 'whoami' },
     ],
   },
   {
@@ -72,7 +74,7 @@ const GROUPS = [
   },
 ]
 
-function SidebarItem({ isActive, color, label, count, onClick }) {
+function SidebarItem({ isActive, color, label, count, hideCount, onClick }) {
   return (
     <div
       onClick={onClick}
@@ -90,7 +92,7 @@ function SidebarItem({ isActive, color, label, count, onClick }) {
         {label}
       </span>
       <span style={{ fontSize: 10, color: isActive ? `${alpha(color, 60)}` : 'var(--mz-accent-2)', fontFamily: 'inherit', minWidth: 20, textAlign: 'right', flexShrink: 0 }}>
-        {count ?? 0}
+        {hideCount ? '↵' : (count ?? 0)}
       </span>
     </div>
   )
@@ -123,6 +125,7 @@ export function Sidebar() {
   const activeResource    = useStore(s => s.activeResource)
   const collapsed         = useStore(s => s.sidebarCollapsed)
   const setActiveResource = useStore(s => s.setActiveResource)
+  const openWhoami        = useStore(s => s.openWhoami)
   const crds              = useStore(s => s.crds)
   const fetchCrdResources = useStore(s => s.fetchCrdResources)
 
@@ -182,12 +185,13 @@ export function Sidebar() {
                 <SectionLabel collapsed={isGroupCollapsed} onToggle={() => toggleGroup(group.label)}>
                   {group.label}
                 </SectionLabel>
-                {!isGroupCollapsed && group.items.map(({ key, label }) => (
+                {!isGroupCollapsed && group.items.map(({ key, label, action }) => (
                   <SidebarItem
                     key={key}
-                    isActive={activeResource === key}
-                    color={group.color} label={label} count={counts[key]}
-                    onClick={() => setActiveResource(key)}
+                    isActive={!action && activeResource === key}
+                    color={group.color} label={label}
+                    count={counts[key]} hideCount={!!action}
+                    onClick={() => action === 'whoami' ? openWhoami() : setActiveResource(key)}
                   />
                 ))}
               </div>

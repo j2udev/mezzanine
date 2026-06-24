@@ -1,4 +1,4 @@
-import { FORWARDABLE, OWNED, CLUSTER_SCOPED_RESOURCES } from './store'
+import { FORWARDABLE, OWNED, CLUSTER_SCOPED_RESOURCES, RBAC_RESOURCES } from './store'
 
 // ── Object action registry ────────────────────────────────────────────────────
 // Single source of truth for every per-object action. To add a new action, add one
@@ -38,6 +38,10 @@ export const OBJECT_ACTIONS = [
     when: r => isStd(r), key: e => e.key === 'e', run: s => s.openModal('edit') },
   { id: 'decode', label: 'Decode secret', hint: 'x', color: 'var(--mz-orange)', group: 'Inspect',
     when: r => r === 'secrets', key: e => e.key === 'x', run: s => s.openSecretDecoded() },
+  // RBAC policy / rules view (task 94) - "what can this resource do". Enter also opens it
+  // (k9s muscle memory, wired in useKeys); `p` is the registry-dispatched alternate.
+  { id: 'policy', label: 'Policy / Rules', hint: '↵', color: 'var(--mz-orange)', group: 'Inspect',
+    when: r => RBAC_RESOURCES.has(r), key: e => e.key === 'p', run: s => s.openModal('policy') },
 
   // ── Helm ─────────────────────────────────────────────────
   { id: 'helm-values', label: 'Values', hint: 'v', color: 'var(--mz-ok)', group: 'Helm',

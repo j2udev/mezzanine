@@ -722,3 +722,103 @@ export function getMockHelmNotes(name) {
 `
 }
 
+// ── RBAC policy / access review (task 94) ─────────────────────────────────────
+// Demo-mode rules keyed by role name, so the policy view shows realistic, recognizable
+// permissions for the mock roles defined in getMockResources().
+const MOCK_ROLE_RULES = {
+  'pod-reader': [
+    { apiGroups: [''], resources: ['pods', 'pods/log'], verbs: ['get', 'list', 'watch'] },
+  ],
+  'deployment-admin': [
+    { apiGroups: ['apps'], resources: ['deployments', 'replicasets'], verbs: ['get', 'list', 'watch', 'create', 'update', 'patch', 'delete'] },
+    { apiGroups: [''], resources: ['pods'], verbs: ['get', 'list', 'watch'] },
+    { apiGroups: [''], resources: ['pods/log'], verbs: ['get'] },
+  ],
+  'log-reader': [
+    { apiGroups: [''], resources: ['pods'], verbs: ['get', 'list'] },
+    { apiGroups: [''], resources: ['pods/log'], verbs: ['get'] },
+  ],
+  'cluster-admin': [
+    { apiGroups: ['*'], resources: ['*'], verbs: ['*'] },
+    { nonResourceURLs: ['*'], verbs: ['*'] },
+  ],
+  'view': [
+    { apiGroups: [''], resources: ['pods', 'services', 'configmaps', 'endpoints', 'persistentvolumeclaims'], verbs: ['get', 'list', 'watch'] },
+    { apiGroups: ['apps'], resources: ['deployments', 'replicasets', 'statefulsets', 'daemonsets'], verbs: ['get', 'list', 'watch'] },
+    { apiGroups: ['batch'], resources: ['jobs', 'cronjobs'], verbs: ['get', 'list', 'watch'] },
+  ],
+  'edit': [
+    { apiGroups: [''], resources: ['pods', 'services', 'configmaps', 'secrets', 'persistentvolumeclaims'], verbs: ['create', 'delete', 'get', 'list', 'patch', 'update', 'watch'] },
+    { apiGroups: ['apps'], resources: ['deployments', 'replicasets', 'statefulsets', 'daemonsets'], verbs: ['create', 'delete', 'get', 'list', 'patch', 'update', 'watch'] },
+    { apiGroups: ['batch'], resources: ['jobs', 'cronjobs'], verbs: ['create', 'delete', 'get', 'list', 'patch', 'update', 'watch'] },
+  ],
+  'cert-manager-controller': [
+    { apiGroups: ['cert-manager.io'], resources: ['certificates', 'certificaterequests', 'issuers'], verbs: ['create', 'delete', 'get', 'list', 'patch', 'update', 'watch'] },
+    { apiGroups: [''], resources: ['secrets'], verbs: ['get', 'list', 'watch', 'create', 'update', 'delete'] },
+    { apiGroups: [''], resources: ['events'], verbs: ['create', 'patch'] },
+  ],
+}
+
+const mockRulesFor = name => MOCK_ROLE_RULES[name] || [{ apiGroups: [''], resources: ['*'], verbs: ['get', 'list', 'watch'] }]
+
+export function getMockPolicy(kind, name, namespace) {
+  const k = (kind || '').toLowerCase()
+
+  if (k === 'role' || k === 'clusterrole') {
+    const isCluster = k === 'clusterrole'
+    return {
+      kind: isCluster ? 'ClusterRole' : 'Role', name, namespace: isCluster ? '' : namespace,
+      sources: [{
+        source: `${isCluster ? 'ClusterRole' : 'Role'}/${name}`,
+        scope: isCluster ? 'cluster-wide' : `namespace: ${namespace}`,
+        rules: mockRulesFor(name),
+      }],
+    }
+  }
+
+  // Bindings → the role they reference + their subjects (mirrors the mock binding table).
+  const bindingRefs = {
+    'admin-binding':         { ref: 'Role/deployment-admin',                role: 'deployment-admin',        subjects: ['ServiceAccount/default/ci-deployer', 'User/jane@example.com'] },
+    'view-binding':          { ref: 'Role/log-reader',                      role: 'log-reader',              subjects: ['ServiceAccount/monitoring/prometheus'] },
+    'cluster-admin-binding': { ref: 'ClusterRole/cluster-admin',           role: 'cluster-admin',           subjects: ['Group/system:masters'] },
+    'cert-manager-binding':  { ref: 'ClusterRole/cert-manager-controller', role: 'cert-manager-controller', subjects: ['ServiceAccount/cert-manager/cert-manager'] },
+  }
+  if (k === 'rolebinding' || k === 'clusterrolebinding') {
+    const isCluster = k === 'clusterrolebinding'
+    const b = bindingRefs[name] || { ref: 'ClusterRole/view', role: 'view', subjects: [] }
+    return {
+      kind: isCluster ? 'ClusterRoleBinding' : 'RoleBinding', name, namespace: isCluster ? '' : namespace,
+      roleRef: b.ref, subjects: b.subjects,
+      sources: [{ source: b.ref, scope: isCluster ? 'cluster-wide' : `namespace: ${namespace}`, rules: mockRulesFor(b.role) }],
+    }
+  }
+
+  // ServiceAccount → aggregate the bindings that reference it.
+  if (k === 'serviceaccount') {
+    const saBindings = {
+      'cert-manager': [{ source: 'ClusterRoleBinding/cert-manager-binding → ClusterRole/cert-manager-controller', scope: 'cluster-wide', role: 'cert-manager-controller' }],
+      'prometheus':   [{ source: 'RoleBinding/view-binding → Role/log-reader', scope: 'namespace: monitoring', role: 'log-reader' }],
+    }
+    const binds = saBindings[name] || []
+    return {
+      kind: 'ServiceAccount', name, namespace,
+      subject: `system:serviceaccount:${namespace}:${name}`,
+      sources: binds.map(b => ({ source: b.source, scope: b.scope, rules: mockRulesFor(b.role) })),
+    }
+  }
+
+  return { kind, name, namespace, sources: [] }
+}
+
+export function getMockWhoAmI(namespace) {
+  return {
+    user: 'kubernetes-admin (demo)',
+    groups: ['system:masters', 'system:authenticated'],
+    namespace,
+    rules: [{ apiGroups: ['*'], resources: ['*'], verbs: ['*'] }],
+    nonResourceRules: [{ nonResourceURLs: ['*'], verbs: ['get'] }],
+    incomplete: false,
+    demo: true,
+  }
+}
+

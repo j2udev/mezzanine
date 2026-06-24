@@ -30,7 +30,7 @@ const SECTIONS = [
       ['w', 'Warp to selected resource\'s namespace'],
       ['Shift+T', 'Theme switcher'],
       ['/', 'Filter by name / namespace'],
-      [':', 'Resource picker (:pods, :ns, CRDs …)'],
+      [':', 'Resource picker (:pods, :ns, :whoami, CRDs …)'],
     ],
   },
   {
@@ -44,6 +44,8 @@ const SECTIONS = [
       ['y', 'YAML / JSON'],
       ['e', 'Edit'],
       ['x', 'Decode secret'],
+      ['p / Enter', 'RBAC policy / rules (roles, bindings, SAs)'],
+      [':whoami', 'My access review (kubectl auth can-i)'],
       ['s', 'Shell into pod'],
       ['Shift+D', 'Debug (ephemeral container)'],
       ['Shift+F', 'Port-forward'],

@@ -3,6 +3,7 @@ import { alpha } from '../theme'
 import { useStore, kubectlResource } from '../store'
 import { VimEditor } from './VimEditor'
 import { VimHelpOverlay } from './VimHelpOverlay'
+import { PolicyView, policyToText } from './PolicyView'
 
 const MULTI_LOG_RESOURCES = new Set(['deployments', 'statefulsets', 'daemonsets', 'services', 'jobs'])
 const CLUSTER_SCOPED      = new Set(['nodes', 'pvs', 'namespaces', 'crds'])
@@ -268,6 +269,7 @@ export function ActionModal() {
 
   // Helm values: single view that toggles between user-supplied and computed (all) values
   const [helmAllValues, setHelmAllValues] = useState(false)
+  const [policyData, setPolicyData] = useState(null)  // RBAC policy / access-review result (task 94)
 
   const scrollRef   = useRef()
   const filterRef   = useRef()   // log filter input
@@ -281,6 +283,7 @@ export function ActionModal() {
   const isMulti  = modal && MULTI_LOG_RESOURCES.has(modal.resource)
   const nsParam  = modal ? (CLUSTER_SCOPED.has(modal.resource) ? '_' : (modal.item.namespace || '_')) : '_'
   const isInspect = modal && (modal.type === 'describe' || modal.type === 'yaml' || modal.type === 'edit')
+  const isPolicy  = modal && modal.type === 'policy'
 
   // ── Derived data ──────────────────────────────────────────────────────────
 
@@ -396,6 +399,20 @@ export function ActionModal() {
     finally      { setLoading(false) }
   }, [modal, nsParam])
 
+  // RBAC policy (object) or self access review (whoami). One callback, two endpoints (task 94).
+  const fetchPolicy = useCallback(async () => {
+    if (!modal) return
+    setLoading(true); setFetchError(null); setPolicyData(null)
+    try {
+      const url = modal.whoami
+        ? `/api/rbac/can-i?namespace=${encodeURIComponent(modal.item.namespace || 'default')}`
+        : `/api/rbac/policy/${modal.resource}/${nsParam}/${encodeURIComponent(modal.item.name)}`
+      const res = await fetch(url)
+      setPolicyData(await res.json())
+    } catch (err) { setFetchError(err.message) }
+    finally      { setLoading(false) }
+  }, [modal, nsParam])
+
   const fetchHelmContent = useCallback(async (helmType) => {
     if (!modal) return
     setLoading(true); setFetchError(null); setHelmHistory([])
@@ -458,12 +475,14 @@ export function ActionModal() {
     setSecretDecoded(!!modal.decoded); setHelmHistory([]); setHelmRollbackStatus({})
     setHistoryValues(null); setHistoryIdx(0); setHistoryValuesAll(false)
     setHelmAllValues(false); prevAllValues.current = null
+    setPolicyData(null)
     fetchedRef.current = {}
     const t = modal.type
     setViewFormat(t === 'describe' ? 'describe' : 'yaml')
     setEditMode(t === 'edit')
     setShowLineNumbers(t === 'edit')  // edit screens default to line numbers on (#57)
     if (t === 'logs')               fetchLogs()
+    else if (t === 'policy')        fetchPolicy()
     else if (t.startsWith('helm-')) fetchHelmContent(t)
   }, [modal?.type, modal?.item?.id])
 
@@ -549,9 +568,11 @@ export function ActionModal() {
 
   const doCopy = useCallback(() => {
     if (!modal) return
-    // Copy what's on screen: edit buffer, the active describe/yaml/json view, or filtered logs.
+    // Copy what's on screen: edit buffer, the active describe/yaml/json view, policy rules,
+    // or filtered logs.
     const text = modal.type === 'logs'
       ? (logFilter ? filteredLogLines.join('\n') : content)
+      : isPolicy ? policyToText(policyData)
       : (isInspect && editMode) ? editContent
       : isInspect ? displayContent
       : content
@@ -559,7 +580,7 @@ export function ActionModal() {
     navigator.clipboard?.writeText(text)
     setCopyFlash(true)
     setTimeout(() => setCopyFlash(false), 1200)
-  }, [modal, content, logFilter, filteredLogLines, isInspect, editMode, editContent, displayContent])
+  }, [modal, content, logFilter, filteredLogLines, isInspect, isPolicy, policyData, editMode, editContent, displayContent])
 
   // ── Vim key handler ───────────────────────────────────────────────────────
 
@@ -746,6 +767,7 @@ export function ActionModal() {
   const inspectColor = editMode ? 'var(--mz-accent)' : viewFormat === 'describe' ? 'var(--mz-alt)' : 'var(--mz-accent)'
   const lineColor = type === 'logs' ? 'var(--mz-ok)'
     : isInspect ? inspectColor
+    : isPolicy ? 'var(--mz-orange)'
     : (type === 'helm-values' || type === 'helm-manifest') ? 'var(--mz-accent)'
     : type === 'helm-history' ? 'var(--mz-orange)'
     : type === 'helm-notes' ? 'var(--mz-orange)'
@@ -755,6 +777,7 @@ export function ActionModal() {
   const typeLabel = type === 'helm-values' ? (helmAllValues ? 'ALL VALUES' : 'VALUES')
     : type === 'helm-manifest' ? 'MANIFEST' : type === 'helm-notes' ? 'NOTES'
     : type === 'helm-history' ? 'HISTORY'
+    : isPolicy ? (modal.whoami ? 'ACCESS REVIEW' : 'POLICY')
     : isInspect ? (editMode ? `EDIT ${viewFormat.toUpperCase()}` : viewFormat.toUpperCase())
     : type.toUpperCase()
 
@@ -813,8 +836,14 @@ export function ActionModal() {
               {typeLabel}
             </span>
             <span style={{ fontSize: 11, color: 'var(--mz-accent-2)' }}>
-              {displayName.slice(0, -1)} / {item.name}
-              {item.namespace && <span style={{ color: 'var(--mz-text-faint)' }}> · {item.namespace}</span>}
+              {isPolicy && modal.whoami ? (
+                <>current identity{item.namespace && <span style={{ color: 'var(--mz-text-faint)' }}> · ns {item.namespace}</span>}</>
+              ) : (
+                <>
+                  {displayName.slice(0, -1)} / {item.name}
+                  {item.namespace && <span style={{ color: 'var(--mz-text-faint)' }}> · {item.namespace}</span>}
+                </>
+              )}
             </span>
             {isSecret && isInspect && (viewFormat === 'yaml' || viewFormat === 'json' || editMode) && (
               <button
@@ -864,10 +893,10 @@ export function ActionModal() {
                     color: 'var(--mz-warn-2)', fontSize: 11, fontFamily: 'inherit',
                   }}
                 />
-                {search && totalMatches > 0 && (
+                {!isPolicy && search && totalMatches > 0 && (
                   <span style={{ fontSize: 10, color: 'var(--mz-warn-2)', flexShrink: 0 }}>{matchIndex + 1}/{totalMatches}</span>
                 )}
-                {search && totalMatches === 0 && (
+                {!isPolicy && search && totalMatches === 0 && (
                   <span style={{ fontSize: 10, color: 'var(--mz-danger-2)', flexShrink: 0 }}>0</span>
                 )}
               </div>
@@ -1141,6 +1170,11 @@ export function ActionModal() {
                   )}
                 </div>
               )}
+
+              {/* RBAC POLICY / ACCESS REVIEW (task 94) - rules table filtered by the `/` search */}
+              {isPolicy && policyData && (
+                <PolicyView data={policyData} whoami={!!modal.whoami} filter={search} />
+              )}
             </>
           )}
         </div>
@@ -1209,7 +1243,7 @@ export function ActionModal() {
             {/* Copy button - read views + logs/helm only. Hidden in edit mode (#16): the
                 editor owns the buffer (yank/registers handle copying), and a Copy chip there
                 competes with the Apply/VIM controls. */}
-            {(isInspect ? (!editMode && !!displayContent) : ((type === 'logs' || isHelm) && content)) && !loading && (
+            {((isInspect ? (!editMode && !!displayContent) : ((type === 'logs' || isHelm) && content)) || (isPolicy && policyData)) && !loading && (
               <button onClick={doCopy} style={{
                 fontSize: 10, padding: '1px 7px', borderRadius: 3, cursor: 'pointer',
                 color: copyFlash ? 'var(--mz-ok)' : 'var(--mz-accent-2)',
@@ -1237,8 +1271,9 @@ export function ActionModal() {
               {(type === 'helm-values' || helmHistoryPeek) && <VimHint k="Tab" label="user/all" />}
               {/* The `e` edit hint moved to the dedicated ✎ Edit button (#24), which already
                   shows its shortcut - no need to repeat it in the left-hand hint cluster. */}
-              {!editMode && !helmHistoryTable && <VimHint k="/" label="search" />}
-              {!editMode && !helmHistoryTable && <VimHint k="n/N" label="next/prev" />}
+              {isPolicy && <VimHint k="/" label="filter" />}
+              {!editMode && !helmHistoryTable && !isPolicy && <VimHint k="/" label="search" />}
+              {!editMode && !helmHistoryTable && !isPolicy && <VimHint k="n/N" label="next/prev" />}
               {isSecret && isInspect && !editMode && <VimHint k="x" label="decode" />}
               {editMode && editVimMode && <VimHint k="?" label="vim keys" />}
             </span>

@@ -1,5 +1,5 @@
 import { useEffect, useRef } from 'react'
-import { useStore, DRILLABLE } from '../store'
+import { useStore, DRILLABLE, RBAC_RESOURCES } from '../store'
 import { actionForKey, applicableActions } from '../actions'
 
 function navigate(s, dir) {
@@ -212,6 +212,12 @@ export function useKeys() {
           if (s.activeResource === 'crds') {
             const crd = s.getFilteredItems().find(i => i.id === s.selectedId)
             if (crd) s.fetchCrdResources(crd.group, crd.version, crd.plural)
+            break
+          }
+
+          // RBAC objects: Enter opens the k9s-style policy / rules view (task 94)
+          if (RBAC_RESOURCES.has(s.activeResource)) {
+            s.openModal('policy')
             break
           }
 

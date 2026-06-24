@@ -10,8 +10,8 @@ import { PassThrough, Writable } from 'stream'
 import { promisify } from 'util'
 import cors from 'cors'
 import yaml from 'js-yaml'
-import { fetchResources, fetchCrdInstances, getExec, addEphemeralDebugContainer } from './k8s.js'
-import { getMockLogs, getMockDescribe, getMockYaml, getMockCrdResources, getMockHelmValues, getMockHelmAllValues, getMockHelmManifest, getMockHelmHistory, getMockHelmNotes } from './mock.js'
+import { fetchResources, fetchCrdInstances, getExec, addEphemeralDebugContainer, fetchPolicy, whoAmI } from './k8s.js'
+import { getMockLogs, getMockDescribe, getMockYaml, getMockCrdResources, getMockHelmValues, getMockHelmAllValues, getMockHelmManifest, getMockHelmHistory, getMockHelmNotes, getMockPolicy, getMockWhoAmI } from './mock.js'
 
 const execAsync = promisify(exec)
 
@@ -570,6 +570,38 @@ app.get('/api/crd/:group/:version/:plural', async (req, res) => {
   }
   const items = await fetchCrdInstances(group, version, plural)
   res.json({ items })
+})
+
+// ── RBAC: policy + self access review (task 94) ──────────────────────────────
+// Map the frontend resource key to the singular kind fetchPolicy/getMockPolicy expect.
+const RBAC_KINDS = {
+  roles: 'role', clusterroles: 'clusterrole', rolebindings: 'rolebinding',
+  clusterrolebindings: 'clusterrolebinding', serviceaccounts: 'serviceaccount',
+}
+
+// Effective policy for an RBAC object (k9s-style "what can this do" view).
+app.get('/api/rbac/policy/:kind/:namespace/:name', async (req, res) => {
+  const { kind, namespace, name } = req.params
+  const k = RBAC_KINDS[kind] || kind
+  const ns = namespace === '_' ? '' : namespace
+  if (latest.demoMode) return res.json(getMockPolicy(k, name, ns))
+  try {
+    res.json(await fetchPolicy(k, ns, name))
+  } catch (err) {
+    res.json({ kind: k, name, namespace: ns, sources: [], error: err.message })
+  }
+})
+
+// Self access review for the dashboard's own identity (the `kubectl auth can-i --list`
+// mechanism). Namespace-scoped, like `auth can-i --list -n <ns>`.
+app.get('/api/rbac/can-i', async (req, res) => {
+  const namespace = req.query.namespace || 'default'
+  if (latest.demoMode) return res.json(getMockWhoAmI(namespace))
+  try {
+    res.json(await whoAmI(namespace))
+  } catch (err) {
+    res.json({ user: null, groups: [], namespace, rules: [], nonResourceRules: [], error: err.message })
+  }
 })
 
 // SPA fallback - serve index.html for any non-API route.

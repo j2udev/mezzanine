@@ -57,6 +57,9 @@ export const RESOURCE_ALIASES = {
 // Resource types that support Enter drill-down
 export const DRILLABLE = new Set(['deployments', 'statefulsets', 'daemonsets', 'services', 'cronjobs', 'jobs', 'pods'])
 
+// RBAC resource types - Enter / p opens the k9s-style policy / rules view (task 94)
+export const RBAC_RESOURCES = new Set(['roles', 'clusterroles', 'rolebindings', 'clusterrolebindings', 'serviceaccounts'])
+
 // Resource types that can be port-forwarded (shift+f)
 export const FORWARDABLE = new Set(['pods', 'services', 'deployments', 'statefulsets'])
 
@@ -309,6 +312,13 @@ export const useStore = create((set, get) => ({
     if (trimmed.startsWith('ns ') || trimmed.startsWith('namespace ')) {
       const ns = trimmed.split(/\s+/).slice(1).join(' ')
       set({ activeNamespace: ns || 'all', commandActive: false, command: '', filterActive: false, filterMode: 'str' })
+      return true
+    }
+
+    // whoami / can-i → self access review modal (task 94)
+    if (['whoami', 'cani', 'can-i', 'access', 'rbac'].includes(trimmed)) {
+      set({ commandActive: false, command: '', filterActive: false, filterMode: 'str' })
+      get().openWhoami()
       return true
     }
 
@@ -572,6 +582,15 @@ export const useStore = create((set, get) => ({
     set({ modal: { type, item, resource: s.activeResource, ...opts } })
   },
   closeModal: () => set({ modal: null }),
+
+  // Self access review - "what can the dashboard's identity do?" (task 94). Not tied to a
+  // selected object, so it opens the policy modal with a synthetic item + whoami flag.
+  // Scoped to the active namespace (SelfSubjectRulesReview is namespace-scoped).
+  openWhoami: () => {
+    const s = get()
+    const ns = s.activeNamespace && s.activeNamespace !== 'all' ? s.activeNamespace : 'default'
+    set({ modal: { type: 'policy', whoami: true, resource: 'whoami', item: { id: 'whoami', name: 'access-review', namespace: ns } } })
+  },
 
   // x on a selected secret: jump straight into the inspect modal (YAML) with values decoded
   openSecretDecoded: () => {
