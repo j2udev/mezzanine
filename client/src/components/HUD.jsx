@@ -535,44 +535,11 @@ export function HUD({ panelWidth = 288 }) {
           <Hint keys={['/']} label="filter" />
           <Hint keys={['?']} label="help" />
 
-          {/* ── Filter / scope chips (#14) - one home for every list-scoping control ──
+          {/* ── Filter / scope chips (#14) ──
               The namespace scope indicator moved up next to the resource name in the header
-              (#23) so all "what am I looking at" cues read in one place; it's no longer
-              duplicated here. Grouping / faults / sort still live in this cluster. */}
-          {/* Namespace grouping toggle (flat list ⇄ grouped headers) */}
-          {namespacedView && (
-            <button
-              onClick={toggleGroupByNamespace}
-              title="Toggle namespace grouping (ctrl+g)"
-              style={{
-                display: 'inline-flex', alignItems: 'center', gap: 4, cursor: 'pointer',
-                padding: '1px 6px', borderRadius: 3, fontSize: 10, fontFamily: 'inherit',
-                color: groupByNamespace ? 'var(--mz-accent)' : 'var(--mz-accent-2)',
-                background: groupByNamespace ? 'rgba(var(--mz-accent-rgb),0.1)' : 'rgba(255,255,255,0.04)',
-                border: `1px solid ${groupByNamespace ? 'rgba(var(--mz-accent-rgb),0.3)' : 'rgba(255,255,255,0.1)'}`,
-              }}
-            >
-              <span style={{ fontSize: 11, lineHeight: 1 }}>{groupByNamespace ? '⊟' : '≡'}</span>
-              {groupByNamespace ? 'grouped' : 'flat'}
-            </button>
-          )}
-          {/* Detail-drawer on/off toggle (#todo3) - moved here next to the flat/group toggle
-              (#25). Off = the right panel never opens, even on selection, giving the list its
-              full width. State persists across reloads. */}
-          <button
-            onClick={togglePanel}
-            title="Toggle detail drawer (ctrl+\\)"
-            style={{
-              display: 'inline-flex', alignItems: 'center', gap: 4, cursor: 'pointer',
-              padding: '1px 6px', borderRadius: 3, fontSize: 10, fontFamily: 'inherit',
-              color: panelEnabled ? 'var(--mz-accent)' : 'var(--mz-accent-2)',
-              background: panelEnabled ? 'rgba(var(--mz-accent-rgb),0.1)' : 'rgba(255,255,255,0.04)',
-              border: `1px solid ${panelEnabled ? 'rgba(var(--mz-accent-rgb),0.3)' : 'rgba(255,255,255,0.1)'}`,
-            }}
-          >
-            <span style={{ fontSize: 11, lineHeight: 1 }}>{panelEnabled ? '◧' : '▭'}</span>
-            {panelEnabled ? 'drawer' : 'wide'}
-          </button>
+              (#23) so all "what am I looking at" cues read in one place. The flat/grouped +
+              drawer/wide layout toggles moved to the bottom-right cluster (#95); only the
+              faults / sort state pills still live here. */}
           {/* Faults-only filter (toggle via ctrl+z or this chip) */}
           {faultsOnly && (
             <span
@@ -664,6 +631,43 @@ export function HUD({ panelWidth = 288 }) {
             - the ⟲ *clears/resets* the trail (ctrl+shift+y); only shown when there is
               history to reset. */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
+          {/* ── Layout toggles (#95) - moved here from the bottom-left cluster ──
+              Namespace grouping (flat list ⇄ grouped headers) + the detail-drawer on/off.
+              Kept together at the leftmost of the right cluster, with the history controls
+              and count to their right. */}
+          {/* Namespace grouping toggle (flat list ⇄ grouped headers) */}
+          {namespacedView && (
+            <button
+              onClick={toggleGroupByNamespace}
+              title="Toggle namespace grouping (ctrl+g)"
+              style={{
+                display: 'inline-flex', alignItems: 'center', gap: 4, cursor: 'pointer',
+                padding: '1px 6px', borderRadius: 3, fontSize: 10, fontFamily: 'inherit',
+                color: groupByNamespace ? 'var(--mz-accent)' : 'var(--mz-accent-2)',
+                background: groupByNamespace ? 'rgba(var(--mz-accent-rgb),0.1)' : 'rgba(255,255,255,0.04)',
+                border: `1px solid ${groupByNamespace ? 'rgba(var(--mz-accent-rgb),0.3)' : 'rgba(255,255,255,0.1)'}`,
+              }}
+            >
+              <span style={{ fontSize: 11, lineHeight: 1 }}>{groupByNamespace ? '⊟' : '≡'}</span>
+              {groupByNamespace ? 'grouped' : 'flat'}
+            </button>
+          )}
+          {/* Detail-drawer on/off toggle (#todo3). Off = the right panel never opens, even on
+              selection, giving the list its full width. State persists across reloads. */}
+          <button
+            onClick={togglePanel}
+            title="Toggle detail drawer (ctrl+\\)"
+            style={{
+              display: 'inline-flex', alignItems: 'center', gap: 4, cursor: 'pointer',
+              padding: '1px 6px', borderRadius: 3, fontSize: 10, fontFamily: 'inherit',
+              color: panelEnabled ? 'var(--mz-accent)' : 'var(--mz-accent-2)',
+              background: panelEnabled ? 'rgba(var(--mz-accent-rgb),0.1)' : 'rgba(255,255,255,0.04)',
+              border: `1px solid ${panelEnabled ? 'rgba(var(--mz-accent-rgb),0.3)' : 'rgba(255,255,255,0.1)'}`,
+            }}
+          >
+            <span style={{ fontSize: 11, lineHeight: 1 }}>{panelEnabled ? '◧' : '▭'}</span>
+            {panelEnabled ? 'drawer' : 'wide'}
+          </button>
           {(showBreadcrumb || !historyEnabled) && (
             <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
               <button
