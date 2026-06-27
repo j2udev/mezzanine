@@ -41,6 +41,8 @@ in `client/src/index.css`, served from `client/public/fonts/pacifico.woff2`.)
 │       │   ├── ActionMenu.jsx          # Actions palette (a) - all applicable actions, grouped/filterable
 │       │   ├── PortForwardModal.jsx    # Shift+F port-forward dialog (port suggestions from object)
 │       │   ├── ExecModal.jsx           # `s` interactive pod shell - xterm + /ws/exec websocket (#81)
+│       │   ├── DebugModal.jsx          # Shift+D ephemeral debug container dialog (#82, hands off to ExecModal)
+│       │   ├── CopyModal.jsx           # Shift+C kubectl-cp file transfer dialog (download/upload, #108)
 │       │   ├── PolicyView.jsx          # RBAC policy / access-review rules table (#94, rendered inside ActionModal)
 │       │   └── HelpModal.jsx           # ? shortcuts overlay
 │       └── hooks/
@@ -136,6 +138,8 @@ rm ~/.cache/ms-playwright-mcp/mcp-chrome-for-testing-b2bf846/SingletonCookie
 | `p` / `Enter`     | RBAC (roles/clusterroles/role&clusterrolebindings/serviceaccounts): open the policy / rules view (#94). SA = rules aggregated across every binding that names it |
 | `v m n h`         | Helm release: values / manifest / notes / history modal                                                                                                          |
 | `s`               | Shell into selected pod (or a single container from the pod drilldown) - interactive terminal (#81)                                                              |
+| `Shift+D`         | Debug pod/container with an ephemeral container, then shell in (#82)                                                                                             |
+| `Shift+C`         | Copy files to/from a pod/container - kubectl cp download/upload dialog (#108)                                                                                     |
 | `Shift+F`         | Port-forward selected pod / service / deployment / statefulset                                                                                                   |
 | `Shift+J`         | Jump to owner (pod/replicaset → controller; job → cronjob)                                                                                                       |
 | `a`               | Actions palette - all actions applicable to the selection                                                                                                        |
@@ -306,6 +310,9 @@ the `:root` fallback in `index.css`, and use it as `var(--mz-<token>)`.
 | POST   | `/api/port-forward/:resource/:namespace/:name`     | Start `kubectl port-forward` (body `{localPort, remotePort}`)                                                                                                                                                                                                                                                     |
 | DELETE | `/api/port-forward/:id`                            | Stop a port-forward (kills the child process)                                                                                                                                                                                                                                                                     |
 | GET    | `/api/crd/:group/:version/:plural`                 | List custom resources for a CRD                                                                                                                                                                                                                                                                                   |
+| POST   | `/api/debug/:namespace/:pod`                       | Inject an ephemeral debug container (body `{image, target?}`); returns `{container}` (#82). Live cluster only                                                                                                                                                                                                      |
+| GET    | `/api/cp/:namespace/:pod/:container?path=`         | kubectl cp DOWNLOAD (#108): streams the container file as itself, or a directory as `<base>.tar`. Live cluster only                                                                                                                                                                                                |
+| POST   | `/api/cp/:namespace/:pod/:container?path=&name=`   | kubectl cp UPLOAD (#108): raw octet-stream body staged + `kubectl cp` into `<path>/<name>`. Returns `{ok, path}`. Live cluster only                                                                                                                                                                                |
 | GET    | `/api/rbac/policy/:kind/:namespace/:name`          | Effective RBAC policy (#94). `kind` = roles/clusterroles/role&clusterrolebindings/serviceaccounts. Returns `{kind,name,namespace,subject?,roleRef?,subjects?,sources:[{source,scope,aggregated,rules,error?}]}`. SA aggregates all bindings that name it; bindings resolve their roleRef. Cluster-scoped ns = `_` |
 | GET    | `/api/rbac/can-i?namespace=`                       | Self access review for the dashboard's own identity (#94, the `kubectl auth can-i --list` mechanism via SelfSubjectRulesReview + SelfSubjectReview). Returns `{user,groups,namespace,rules,nonResourceRules,incomplete}`                                                                                          |
 | WS     | `/ws/exec?namespace&pod&container&shell&cols&rows` | Interactive pod shell (#81). Binary frames = stdin/stdout bytes; text frames = JSON control (`{type:'resize'}` in, `{type:'ready'\|'error'\|'exit'}` out). Bridges client-node `Exec` ⇄ browser xterm. Live cluster only                                                                                          |
@@ -513,6 +520,21 @@ rendered inside ActionModal (modal type `policy`); ONE `policy` registry entry
 in actions.js. Demo mode has `getMockPolicy`/`getMockWhoAmI`. **Part 2 (app auth
 mechanism) was explicitly deferred** per discussion - see #94's auth questions;
 the build covers RBAC only.
+
+**Session 27:** #108 - kubectl cp file copy (`Shift+C` on a pod / container).
+New `CopyModal.jsx` with a container picker (pods with >1 container) + two
+forms: DOWNLOAD (path in the container -> browser) and UPLOAD (browser file ->
+container dir). The "local" side is the BROWSER, not the server fs: download
+fetches the endpoint and triggers a blob download; upload POSTs the File's raw
+bytes. Backend reuses the real `kubectl cp` (execFile, no shell) staging bytes
+in a per-request `mkdtemp` (always cleaned up): `GET /api/cp/:ns/:pod/:container`
+copies out then streams a single file as itself or a directory as `<base>.tar`;
+`POST /api/cp/:ns/:pod/:container?path=&name=` (express.raw octet-stream) stages
+the upload then cp's it in. Path safety: `validId` on ns/pod/container,
+`validPath` (no control chars, no leading `-`) on the container path, `safeBase`
+strips traversal from the uploaded filename. Live cluster only (kubectl cp execs
+`tar` in the target, so the image needs tar). ONE `copy` actions.js entry (panel
+chip + `a` palette + `Shift+C`); useKeys yields to the dialog like exec/debug.
 
 **Remaining:**
 
