@@ -111,6 +111,13 @@ export const OBJECT_ACTIONS = [
   { id: 'aws-inspect', label: 'Inspect', hint: 'd', color: 'var(--mz-alt)', group: 'Inspect',
     when: r => AWS_RESOURCE_KEYS.has(r) && r !== 's3objects',
     key: e => e.key === 'd' && !e.ctrlKey && !e.metaKey && !e.altKey, run: s => s.openModal('aws-inspect') },
+  // Related resources (phase 1) - the typed "connected resources" view, the multi-edge analog of
+  // jumpToOwner. `r` opens a pick-list of the resources this one links to (EC2 -> SGs/VPC/EBS/EIP;
+  // S3 bucket -> log-target/replication bucket + notification Lambdas); Enter teleports. Only the
+  // AWS types with a backend related() resolver get it.
+  { id: 'aws-related', label: 'Related resources', hint: 'r', color: 'var(--mz-accent-2)', group: 'Navigate',
+    when: r => r === 'ec2instances' || r === 's3buckets',
+    key: e => e.key === 'r' && !e.ctrlKey && !e.metaKey && !e.altKey, run: s => s.openRelated() },
   // S3 copy/download/upload - same Shift+C muscle memory as the kubectl-cp copy above, but the
   // implementation is bucket/key blob get/put, not exec+tar (friction #5). `when` is disjoint from
   // the kubectl 'copy' action's (pods/containers), so the shared Shift+C never collides.

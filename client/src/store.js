@@ -292,6 +292,7 @@ export const useStore = create((set, get) => ({
   debugModal: null,      // { namespace, pod, target, containers, label } when the debug dialog is open (#82)
   cpModal: null,         // { namespace, pod, container, containers, label } when the copy dialog is open (#108)
   s3CpModal: null,       // { bucket, objectKey, label } when the S3 copy dialog is open (module #2)
+  relatedModal: null,    // { label, loading, links, error } when the AWS related-resources view is open (phase 1)
   deleteConfirm: null,   // { item, resource } when ctrl+d confirm is pending
 
   setData: (data) => set(data),
@@ -864,6 +865,50 @@ export const useStore = create((set, get) => ({
       sortKey: null, sortDir: 'asc',
       selectedId: target.id, selectedIds: new Set(),
     })
+  },
+
+  // ── AWS related resources (phase 1) ──────────────────────────────────────────
+  // Open the typed "connected resources" view for the selected AWS resource. The AWS analog of
+  // jumpToOwner, but multi-edge: fetches /api/aws/related and shows a pick-list the user Enters into.
+  // Mirrors drillIntoBucket's async fetch-and-apply-if-still-open guard so a late response doesn't
+  // clobber a modal the user already closed/changed.
+  openRelated: () => {
+    const s = get()
+    if (!s.selectedId || s.activeProvider !== 'aws') return
+    const item = s.getItems().find(i => i.id === s.selectedId)
+    if (!item) return
+    const label = item.name || item.id
+    set({ relatedModal: { label, loading: true, links: [], error: null } })
+    const url = `/api/aws/related/${s.activeResource}/${encodeURIComponent(item.region || '')}/${encodeURIComponent(item.id)}`
+    fetch(url)
+      .then(r => r.json())
+      .then(({ links, error }) => set(st => st.relatedModal?.label === label
+        ? { relatedModal: { ...st.relatedModal, loading: false, links: links || [], error: error || null } } : {}))
+      .catch(err => set(st => st.relatedModal?.label === label
+        ? { relatedModal: { ...st.relatedModal, loading: false, error: err.message } } : {}))
+  },
+  closeRelated: () => set({ relatedModal: null }),
+
+  // Teleport to a related resource (generalizes jumpToOwner): switch to the target resource type,
+  // select the linked row, push a nav frame so `[`/Esc returns. Guards on the target existing in
+  // the current data stream (cross-account/region links won't be present) - returns false if not,
+  // so the modal can surface "not in this view".
+  jumpToRelated: (link) => {
+    const s = get()
+    if (!link) return false
+    const target = (s[link.resource] || []).find(i => i.id === link.id || i.name === link.id)
+    if (!target) return false
+    set({
+      relatedModal: null,
+      navStack: pushNav(s.navStack, navFrame(s)), navFuture: [],
+      activeResource: link.resource, activeProvider: resourceProvider(link.resource),
+      drilldownItems: null, drilldownLabel: '',
+      activeNamespace: 'all',
+      filter: '', filterActive: false, filterPinned: false,
+      sortKey: null, sortDir: 'asc',
+      selectedId: target.id, selectedIds: new Set(),
+    })
+    return true
   },
 
   getItems: () => {

@@ -7,7 +7,7 @@
 // -> empty. The AWS SDK v3 is imported LAZILY (dynamic import inside loadSdk), so a build/run with
 // neither the deps installed nor credentials present still boots cleanly and serves empty/mock.
 
-import { getMockAwsResources, getMockS3Objects, getMockS3Object, getMockAwsDescribe } from './aws-mock.js'
+import { getMockAwsResources, getMockS3Objects, getMockS3Object, getMockAwsDescribe, getMockAwsRelated } from './aws-mock.js'
 
 // Demo gate is SEPARATE from k8s MEZZ_DEMO on purpose: the two providers have independent
 // connection/health state (you may run live k8s + mock AWS, or vice versa). One global demoMode
@@ -15,11 +15,20 @@ import { getMockAwsResources, getMockS3Objects, getMockS3Object, getMockAwsDescr
 const DEMO = !!process.env.MEZZ_AWS_DEMO &&
   process.env.MEZZ_AWS_DEMO !== '0' && process.env.MEZZ_AWS_DEMO !== 'false'
 
-// Single-region first (decided with the user): one AWS_REGION, no region picker yet. EC2 is
+// Single-region first (decided with the user): one region, no region picker yet. EC2 is
 // strictly per-region; S3 ListBuckets is global but each bucket has a home region. The absent
 // region axis is the cleanest entry in the friction log - it points straight at the future
 // provider "scope axis" abstraction (the generic replacement for k8s 'namespace').
-const REGION = process.env.AWS_REGION || process.env.AWS_DEFAULT_REGION || 'us-east-1'
+//
+// Region resolution follows AWS_PROFILE: an explicit AWS_REGION / AWS_DEFAULT_REGION always wins,
+// but otherwise we DON'T pin a region on the clients - we let the SDK resolve it from the active
+// profile's `region` (so a GovCloud profile talks to its gov partition instead of being force-
+// pinned to us-east-1, which would break STS/EC2 across partitions). REGION holds the *effective*
+// region for display + row-stamping: it starts as the override (or a us-east-1 placeholder for the
+// pre-connect empty/mock view) and is updated to the SDK-resolved value on first successful
+// connect. Switching AWS_PROFILE takes effect on a server restart (clients are cached, like k8s.js).
+const REGION_OVERRIDE = process.env.AWS_REGION || process.env.AWS_DEFAULT_REGION || null
+let REGION = REGION_OVERRIDE || 'us-east-1'
 
 // Only touch AWS at all when it is plausibly configured - otherwise the 5s refresh would hammer
 // STS on every tick in a pure-k8s devcontainer. Enabled by demo, an explicit opt-in, or any of the
@@ -70,19 +79,25 @@ async function getClients() {
   if (!AWS_ENABLED) { lastError = 'AWS not configured'; return null }
   if (cachedClients) return cachedClients
   try {
-    const { s3, ec2, sts } = await loadSdk()
-    const cfg = { region: REGION }
+    const { s3, ec2, sts, lambda } = await loadSdk()
+    // Only pin region when explicitly overridden; otherwise leave it unset so the SDK resolves it
+    // from the active profile (AWS_PROFILE) - critical for non-us-east-1 / GovCloud profiles.
+    const cfg = REGION_OVERRIDE ? { region: REGION_OVERRIDE } : {}
     const stsClient = new sts.STSClient(cfg)
     identity = await Promise.race([
       stsClient.send(new sts.GetCallerIdentityCommand({})),
       new Promise((_, reject) => setTimeout(() => reject(new Error('AWS STS timeout after 5s')), 5000)),
     ])
+    // Resolve the region the SDK actually settled on (from the profile, if no override) so the UI
+    // and row stamping reflect reality. config.region is an async provider; fall back to REGION.
+    try { REGION = REGION_OVERRIDE || await stsClient.config.region() || REGION } catch { /* keep current REGION */ }
     cachedClients = {
       s3: new s3.S3Client(cfg), ec2: new ec2.EC2Client(cfg), sts: stsClient,
       lambda: new lambda.LambdaClient(cfg), region: REGION,
     }
     lastError = null
-    console.log(`  ✓ AWS connected: ${identity.Arn} (account ${identity.Account}, region ${REGION})`)
+    const prof = process.env.AWS_PROFILE ? `, profile ${process.env.AWS_PROFILE}` : ''
+    console.log(`  ✓ AWS connected: ${identity.Arn} (account ${identity.Account}, region ${REGION}${prof})`)
     return cachedClients
   } catch (err) {
     lastError = err.message
@@ -134,6 +149,36 @@ const SERVICES = [
       await safe('Tags',              async () => (await clients.s3.send(new s3.GetBucketTaggingCommand({ Bucket: id }))).TagSet)
       return detail
     },
+    // Related resources (phase 1): the bucket-config edges that point at a target mezzanine already
+    // broadcasts - the log-target bucket, replication-destination bucket(s), and notification Lambda
+    // functions. Each Get* is optional (an unconfigured bucket throws NoSuch*, swallowed). Lambda
+    // links carry the function ARN as id (matches the lambdafunctions row id = FunctionArn); bucket
+    // links carry the bare bucket name (= s3buckets row id). The store guards each on the target
+    // existing in the current data stream (cross-account/region targets won't be present).
+    async related(clients, id) {
+      const { s3 } = await loadSdk()
+      const links = []
+      const safe = async (fn) => { try { return await fn() } catch { return null } }
+      // Server access logging -> target bucket.
+      const log = await safe(() => clients.s3.send(new s3.GetBucketLoggingCommand({ Bucket: id })))
+      const logTarget = log?.LoggingEnabled?.TargetBucket
+      if (logTarget) links.push({ resource: 's3buckets', id: logTarget, name: logTarget, relation: 'log target' })
+      // Replication -> destination bucket(s). Destination.Bucket is an ARN (arn:aws:s3:::name).
+      const rep = await safe(() => clients.s3.send(new s3.GetBucketReplicationCommand({ Bucket: id })))
+      for (const rule of rep?.ReplicationConfiguration?.Rules || []) {
+        const arn = rule.Destination?.Bucket
+        const name = arn ? arn.replace(/^arn:[^:]*:s3:::/, '') : null
+        if (name) links.push({ resource: 's3buckets', id: name, name, relation: 'replication target' })
+      }
+      // Event notification -> Lambda functions. A bucket may have several notification configs
+      // pointing at the same function (one per event); dedupeLinks collapses them.
+      const notif = await safe(() => clients.s3.send(new s3.GetBucketNotificationConfigurationCommand({ Bucket: id })))
+      for (const cfg of notif?.LambdaFunctionConfigurations || []) {
+        const arn = cfg.LambdaFunctionArn
+        if (arn) links.push({ resource: 'lambdafunctions', id: arn, name: arn.split(':function:')[1] || arn, relation: 'notification' })
+      }
+      return dedupeLinks(links)
+    },
   },
   {
     key: 'ec2instances',
@@ -168,6 +213,40 @@ const SERVICES = [
       const inst = (out.Reservations || []).flatMap(r => r.Instances || [])[0]
       if (!inst) throw new Error(`Instance ${id} not found`)
       return inst
+    },
+    // Related resources (phase 1): the typed edges the console's instance detail page exposes as
+    // clickable links, restricted to targets mezzanine ALREADY broadcasts (so a jump is an in-memory
+    // teleport). Each link is { resource, id, name, relation }; `id` matches the target row's id so
+    // the store can resolve it. EIP is the one edge NOT on the Instance object (the embedded
+    // association shape carries no AllocationId), so it needs a DescribeAddresses by instance-id.
+    async related(clients, id) {
+      const { ec2 } = await loadSdk()
+      const out = await clients.ec2.send(new ec2.DescribeInstancesCommand({ InstanceIds: [id] }))
+      const inst = (out.Reservations || []).flatMap(r => r.Instances || [])[0]
+      if (!inst) return []
+      const links = []
+      // Security groups: instance-level + per-ENI, deduped by GroupId (row id = GroupId).
+      const sgs = new Map()
+      for (const g of inst.SecurityGroups || []) if (g.GroupId) sgs.set(g.GroupId, g.GroupName || g.GroupId)
+      for (const ni of inst.NetworkInterfaces || []) for (const g of ni.Groups || []) if (g.GroupId) sgs.set(g.GroupId, g.GroupName || g.GroupId)
+      for (const [gid, gname] of sgs) links.push({ resource: 'securitygroups', id: gid, name: gname, relation: 'security group' })
+      // VPC (row id = VpcId).
+      if (inst.VpcId) links.push({ resource: 'vpcs', id: inst.VpcId, name: inst.VpcId, relation: 'vpc' })
+      // EBS volumes from block device mappings (row id = VolumeId).
+      for (const bdm of inst.BlockDeviceMappings || []) {
+        const vid = bdm.Ebs?.VolumeId
+        if (vid) links.push({ resource: 'ebsvolumes', id: vid, name: vid, relation: bdm.DeviceName ? `volume (${bdm.DeviceName})` : 'volume' })
+      }
+      // Elastic IPs - not readable off the instance object; query by instance-id (row id =
+      // AllocationId || PublicIp). Optional permission, so swallow a failure.
+      try {
+        const addrs = await clients.ec2.send(new ec2.DescribeAddressesCommand({ Filters: [{ Name: 'instance-id', Values: [id] }] }))
+        for (const a of addrs.Addresses || []) {
+          const aid = a.AllocationId || a.PublicIp
+          if (aid) links.push({ resource: 'elasticips', id: aid, name: a.PublicIp || aid, relation: 'elastic ip' })
+        }
+      } catch { /* ec2:DescribeAddresses optional */ }
+      return dedupeLinks(links)
     },
   },
   // ── COMPUTE ──────────────────────────────────────────────
@@ -335,6 +414,21 @@ function ec2StatusLabel(state) {
   }
 }
 
+// Collapse duplicate related-resource links (same resource + id), keeping the first relation seen.
+// AWS can emit the same edge twice - e.g. a Lambda referenced by several S3 notification events, or
+// a security group attached both at the instance level and on an ENI.
+function dedupeLinks(links) {
+  const seen = new Set()
+  const out = []
+  for (const l of links) {
+    const k = `${l.resource}:${l.id}`
+    if (seen.has(k)) continue
+    seen.add(k)
+    out.push(l)
+  }
+  return out
+}
+
 // Title-case a hyphenated AWS state ('in-use' -> 'In-use', 'available' -> 'Available') so it
 // resolves through the shared statusColor map.
 function titleCase(s) {
@@ -390,6 +484,26 @@ export async function fetchAwsDescribe(service, region, id) {
   let json
   try { json = JSON.stringify(detail, null, 2) } catch { json = String(detail) }
   return { json, tags, describe: formatAwsDescribe(detail, tags) }
+}
+
+// ── Related resources (phase 1) ───────────────────────────────────────────────
+// The AWS-native analog of k8s jumpToOwner, but typed and multi-edge: returns the connected
+// resources the console's detail page would link to, restricted to types mezzanine broadcasts.
+// Dispatches to the per-service related() on the SERVICES registry; a service with none returns [].
+// 3-tier fallback like every other AWS helper: live -> mock (MEZZ_AWS_DEMO) -> empty.
+export async function fetchAwsRelated(service, region, id) {
+  const svc = SERVICES.find(s => s.key === service)
+  if (!svc || !svc.related) return { links: [] }
+  const clients = await getClients()
+  if (!clients) {
+    if (!DEMO) return { links: [], error: lastError || 'No AWS connection.' }
+    return { links: getMockAwsRelated(service, id) }
+  }
+  try {
+    return { links: await svc.related(clients, id, region || REGION) }
+  } catch (err) {
+    return { links: [], error: err.message }
+  }
 }
 
 // Normalize AWS's two tag shapes into a flat { key: value } map: the EC2-family `[{Key,Value}]`

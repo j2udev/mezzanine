@@ -172,6 +172,32 @@ export function getMockAwsDescribe(service, id) {
   }
 }
 
+// Related resources for the demo (phase 1) - the typed edges the RelatedModal shows. Derived from
+// getMockAwsResources so every link resolves to a REAL demo row (the store guards on existence, so
+// dangling links would just be dropped). EC2: its attached EBS volume(s) + EIP (reverse-matched by
+// attachedTo/associatedTo), plus a representative SG and the prod VPC. S3: a notification Lambda for
+// the upload-ish buckets, and a log-target bucket for everything pointing at the cloudtrail bucket.
+export function getMockAwsRelated(service, id) {
+  const all = getMockAwsResources()
+  if (service === 'ec2instances') {
+    const links = []
+    links.push({ resource: 'securitygroups', id: 'sg-0a1b2c3d4e5f60002', name: 'web-sg', relation: 'security group' })
+    links.push({ resource: 'vpcs', id: 'vpc-0a1b2c3d4e5f60002', name: 'prod-vpc', relation: 'vpc' })
+    for (const v of all.ebsvolumes) if (v.attachedTo === id) links.push({ resource: 'ebsvolumes', id: v.id, name: v.name, relation: 'volume (/dev/xvda)' })
+    for (const e of all.elasticips) if (e.associatedTo === id) links.push({ resource: 'elasticips', id: e.id, name: e.publicIp, relation: 'elastic ip' })
+    return links
+  }
+  if (service === 's3buckets') {
+    const links = []
+    // The cloudtrail-logs bucket is the access-log sink for the other buckets.
+    if (id !== 'mezza9-cloudtrail-logs') links.push({ resource: 's3buckets', id: 'mezza9-cloudtrail-logs', name: 'mezza9-cloudtrail-logs', relation: 'log target' })
+    // Upload-ish buckets fire a thumbnailing Lambda on object-created.
+    if (id === 'mezza9-user-uploads' || id === 'mezza9-prod-assets') links.push({ resource: 'lambdafunctions', id: 'fn:image-thumbnailer', name: 'image-thumbnailer', relation: 'notification' })
+    return links
+  }
+  return []
+}
+
 // A single object's bytes, for the demo DOWNLOAD path (so Shift+C download works with no creds).
 export function getMockS3Object(bucket, key) {
   const body = Buffer.from(

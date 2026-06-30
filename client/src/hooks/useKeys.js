@@ -47,6 +47,10 @@ export function useKeys() {
       // The S3 copy dialog (module #2) has its own inputs; yield the keyboard, handle Esc.
       if (s.s3CpModal) { if (e.key === 'Escape') s.closeS3Cp(); return }
 
+      // The AWS related-resources view (phase 1) owns the keyboard via its own capture-phase
+      // listener (j/k select, Enter jump, / filter, Esc close); yield entirely while it's open.
+      if (s.relatedModal) return
+
       if (s.helpOpen) {
         if (e.key === 'Escape' || e.key === '?') { e.preventDefault(); s.setHelpOpen(false) }
         return

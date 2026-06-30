@@ -8,6 +8,7 @@ import { ExecModal } from './ExecModal'
 import { DebugModal } from './DebugModal'
 import { CopyModal } from './CopyModal'
 import { S3CopyModal } from './S3CopyModal'
+import { RelatedModal } from './RelatedModal'
 import { HelpModal } from './HelpModal'
 import { ActionMenu } from './ActionMenu'
 
@@ -521,6 +522,9 @@ export function HUD({ panelWidth = 288 }) {
 
       {/* ── S3 copy dialog (module #2) ───────────────────────────── */}
       <S3CopyModal />
+
+      {/* ── AWS related resources (phase 1) ──────────────────────── */}
+      <RelatedModal />
 
       {/* ── Help modal ───────────────────────────────────────────── */}
       <HelpModal />

@@ -34,6 +34,13 @@ fi
 # bundles them on PATH). Set MEZZ_DEMO=1 here if you want the mock cluster locally.
 export MEZZ_KUBECTL="$REPO/.devbox/nix/profile/default/bin/kubectl"
 export MEZZ_HELM="$REPO/.devbox/nix/profile/default/bin/helm"
+
+# AWS: the default credential chain reads AWS_PROFILE from this exported env (mounted ~/.aws).
+# Region follows the profile unless AWS_REGION is set explicitly. Just surface what's active -
+# export AWS_PROFILE=<name> in your shell before running this to switch accounts.
+if [ -n "$AWS_PROFILE" ] || [ -n "$AWS_REGION" ] || [ -n "$MEZZ_AWS" ] || [ -n "$AWS_ACCESS_KEY_ID" ]; then
+  echo "  AWS: profile=${AWS_PROFILE:-<default chain>} region=${AWS_REGION:-<from profile>}"
+fi
 echo "  Starting server → http://localhost:3001"
 cd "$REPO"
 nohup $NODE src/server.js >> /tmp/k8s-backend.log 2>&1 &

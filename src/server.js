@@ -16,7 +16,7 @@ import cors from 'cors'
 import yaml from 'js-yaml'
 import { fetchResources, fetchCrdInstances, getExec, addEphemeralDebugContainer, fetchPolicy, whoAmI } from './k8s.js'
 import { getMockLogs, getMockDescribe, getMockYaml, getMockCrdResources, getMockHelmValues, getMockHelmAllValues, getMockHelmManifest, getMockHelmHistory, getMockHelmNotes, getMockPolicy, getMockWhoAmI } from './mock.js'
-import { fetchAwsResources, fetchS3Objects, fetchAwsDescribe, ec2Action, s3GetObject, s3PutObject, RESOURCE_KEYS as AWS_RESOURCE_KEYS } from './aws.js'
+import { fetchAwsResources, fetchS3Objects, fetchAwsDescribe, fetchAwsRelated, ec2Action, s3GetObject, s3PutObject, RESOURCE_KEYS as AWS_RESOURCE_KEYS } from './aws.js'
 
 // archiver (7.x) is CommonJS; load it via createRequire since this module is ESM. It streams
 // directory/file downloads as tar / tar.gz / zip entirely in-process (task 108), so no host
@@ -963,6 +963,16 @@ app.get('/api/aws/describe/:service/:region/:id', async (req, res) => {
   if (!AWS_RESOURCE_KEYS.includes(service)) return res.status(400).json({ error: 'Unknown AWS service' })
   if (!validId(region) || !validId(id)) return res.status(400).json({ error: 'Invalid region or id' })
   res.json(await fetchAwsDescribe(service, region, id))
+})
+
+// GET a resource's RELATED resources for the jump view (phase 1): { links:[{resource,id,name,relation}] }.
+// The AWS-native analog of jumpToOwner, typed + multi-edge. region + id smuggled in the path like
+// describe. Self-tiers live -> mock; the client guards each link on the target existing in its data.
+app.get('/api/aws/related/:service/:region/:id', async (req, res) => {
+  const { service, region, id } = req.params
+  if (!AWS_RESOURCE_KEYS.includes(service)) return res.status(400).json({ error: 'Unknown AWS service' })
+  if (!validId(region) || !validId(id)) return res.status(400).json({ error: 'Invalid region or id' })
+  res.json(await fetchAwsRelated(service, region, id))
 })
 
 // GET objects in a bucket (the lazy Enter-drill target; s3objects is never broadcast in the stream).
